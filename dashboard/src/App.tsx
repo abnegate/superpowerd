@@ -80,6 +80,28 @@ function Sparkline({ data, height = 48 }: { data: number[]; height?: number }) {
   );
 }
 
+function UsageBar({ label, percent, reset }: { label: string; percent: number; reset: string | null }) {
+  const minutes = reset ? Math.max(0, Math.floor((new Date(reset).getTime() - Date.now()) / 60000)) : null;
+  const hours = minutes !== null ? Math.floor(minutes / 60) : null;
+  const remaining = hours !== null && hours > 0 ? hours + "h " + (minutes! % 60) + "m" : minutes !== null ? minutes + "m" : "";
+  const color = percent >= 90 ? "var(--red)" : percent >= 70 ? "var(--bright-orange)" : "var(--green)";
+
+  return (
+    <div className="usage-bar-row">
+      <div className="usage-bar-header">
+        <span className="key">{label}</span>
+        <span className="usage-bar-stats">
+          <span style={{ color }}>{percent}%</span>
+          {remaining && <span className="dim"> resets {remaining}</span>}
+        </span>
+      </div>
+      <div className="usage-bar-track">
+        <div className="usage-bar-fill" style={{ width: percent + "%", background: color }} />
+      </div>
+    </div>
+  );
+}
+
 type ChartRange = 1 | 7 | 14 | 30;
 
 function ActivityChart({ activity }: { activity: DailyEntry[] }) {
@@ -297,18 +319,22 @@ export default function App() {
                 <span className="key">org</span>
                 <span className="value">{auth.orgName}</span>
               </div>
-              {claudeUsage && (
+              {claudeUsage && (claudeUsage as any).five_hour && (
                 <>
                   <div className="auth-row section-break">
                     <span className="key">current usage</span>
                     <span className="value dim" />
                   </div>
-                  {Object.entries(claudeUsage).filter(([k]) => k !== "error").map(([key, value]) => (
-                    <div className="auth-row" key={key}>
-                      <span className="key">{key.replace(/_/g, " ")}</span>
-                      <span className="value">{typeof value === "object" ? JSON.stringify(value) : String(value)}</span>
-                    </div>
-                  ))}
+                  <UsageBar
+                    label="5-hour"
+                    percent={(claudeUsage as any).five_hour.utilization}
+                    reset={(claudeUsage as any).five_hour.resets_at}
+                  />
+                  <UsageBar
+                    label="7-day"
+                    percent={(claudeUsage as any).seven_day.utilization}
+                    reset={(claudeUsage as any).seven_day.resets_at}
+                  />
                 </>
               )}
               <div className="auth-row section-break">

@@ -1,10 +1,11 @@
 import express, { type Request, type Response } from "express";
-import { readFileSync, existsSync, readdirSync, statSync } from "fs";
+import { readFileSync, existsSync, readdirSync, statSync, copyFileSync, unlinkSync } from "fs";
 import { execFile, execFileSync, spawn } from "child_process";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
 import https from "https";
+import crypto from "crypto";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectDirectory = resolve(__dirname, "..");
@@ -303,33 +304,92 @@ app.get("/api/usage", (_: Request, response: Response) => {
   });
 });
 
-// Cached usage from Anthropic's OAuth usage endpoint (rate-limited, cache 5 min)
-let cachedClaudeUsage: { data: unknown; fetchedAt: number } | null = null;
+// Live usage from claude.ai web API (cookie-based auth via session key)
+let cachedLiveUsage: { data: unknown; fetchedAt: number } | null = null;
 
 app.get("/api/claude-usage", (_: Request, response: Response) => {
   const now = Date.now();
-  if (cachedClaudeUsage && now - cachedClaudeUsage.fetchedAt < 300000) {
-    response.json(cachedClaudeUsage.data);
+  if (cachedLiveUsage && now - cachedLiveUsage.fetchedAt < 60000) {
+    response.json(cachedLiveUsage.data);
     return;
   }
 
-  // Read OAuth token from keychain
-  try {
-    const password = execFileSync("security", [
-      "find-generic-password", "-s", "Claude Code-credentials", "-w"
-    ], { encoding: "utf8", timeout: 5000 }).trim();
-    const credentials = JSON.parse(password);
-    const token = credentials.claudeAiOauth?.accessToken;
-    if (!token) {
-      response.json({ error: "no token" });
+  // Get org ID from CLI auth status
+  execFile("claude", ["auth", "status"], { timeout: 5000 }, (error, stdout) => {
+    if (error) {
+      response.json({ error: "not authenticated" });
+      return;
+    }
+
+    let orgId: string;
+    try {
+      orgId = JSON.parse(stdout).orgId;
+    } catch {
+      response.json({ error: "no org" });
+      return;
+    }
+
+    // Read session cookie from Firefox
+    let sessionKey = "";
+    try {
+      const firefoxBase = join(homedir(), "Library", "Application Support", "Firefox", "Profiles");
+      const entries = readdirSync(firefoxBase);
+      const profile = entries.find((e) => e.endsWith(".default-release"));
+      if (profile) {
+        const temp = "/tmp/sp-usage-cookies.sqlite";
+        const source = join(firefoxBase, profile, "cookies.sqlite");
+        copyFileSync(source, temp);
+        try { copyFileSync(source + "-wal", temp + "-wal"); } catch {}
+        try { copyFileSync(source + "-shm", temp + "-shm"); } catch {}
+        const output = execFileSync("sqlite3", ["-separator", "\t", temp,
+          "SELECT value FROM moz_cookies WHERE host LIKE '%claude.ai%' AND name = 'sessionKey' LIMIT 1"
+        ], { encoding: "utf8", timeout: 3000 }).trim();
+        unlinkSync(temp);
+        try { unlinkSync(temp + "-wal"); } catch {}
+        try { unlinkSync(temp + "-shm"); } catch {}
+        if (output) sessionKey = output;
+      }
+    } catch {}
+
+    // Also try Chrome cookies if no Firefox session
+    if (!sessionKey) {
+      try {
+        const password = execFileSync("security", [
+          "find-generic-password", "-s", "Chrome Safe Storage", "-w"
+        ], { encoding: "utf8", timeout: 5000 }).trim();
+                const key = crypto.pbkdf2Sync(password, "saltysalt", 1003, 16, "sha1");
+        const iv = Buffer.alloc(16, 0x20);
+        const chromeDb = join(homedir(), "Library", "Application Support", "Google", "Chrome", "Default", "Cookies");
+        const temp = "/tmp/sp-chrome-usage.sqlite";
+        copyFileSync(chromeDb, temp);
+        const hex = execFileSync("sqlite3", ["-separator", "\t", temp,
+          "SELECT hex(encrypted_value) FROM cookies WHERE host_key LIKE '%claude.ai%' AND name = 'sessionKey' LIMIT 1"
+        ], { encoding: "utf8", timeout: 3000 }).trim();
+        unlinkSync(temp);
+        if (hex) {
+          const buf = Buffer.from(hex, "hex");
+          if (buf.length > 3 && buf.subarray(0, 3).toString() === "v10") {
+            const decipher = crypto.createDecipheriv("aes-128-cbc", key, iv);
+            decipher.setAutoPadding(true);
+            sessionKey = Buffer.concat([decipher.update(buf.subarray(3)), decipher.final()]).toString("utf8");
+          }
+        }
+      } catch {}
+    }
+
+    if (!sessionKey) {
+      response.json({ error: "no session cookie" });
       return;
     }
 
     const options = {
-      hostname: "api.anthropic.com",
-      path: "/api/oauth/usage",
+      hostname: "claude.ai",
+      path: "/api/organizations/" + orgId + "/usage",
       method: "GET",
-      headers: { "Authorization": "Bearer " + token },
+      headers: {
+        "Cookie": "sessionKey=" + sessionKey,
+        "User-Agent": "Mozilla/5.0",
+      },
     };
 
     const request = https.request(options, (upstream: any) => {
@@ -340,11 +400,11 @@ app.get("/api/claude-usage", (_: Request, response: Response) => {
         try {
           const data = JSON.parse(body);
           if (!data.error) {
-            cachedClaudeUsage = { data, fetchedAt: now };
+            cachedLiveUsage = { data, fetchedAt: now };
           }
           response.json(data);
         } catch {
-          response.json({ error: "parse error", raw: body });
+          response.json({ error: "parse error" });
         }
       });
     });
@@ -356,9 +416,7 @@ app.get("/api/claude-usage", (_: Request, response: Response) => {
       response.json({ error: "timeout" });
     });
     request.end();
-  } catch (error: any) {
-    response.json({ error: error.message });
-  }
+  });
 });
 
 app.get("/api/auth", (_: Request, response: Response) => {

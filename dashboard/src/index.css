@@ -270,6 +270,49 @@ button.danger:hover {
   font-weight: 500;
 }
 
+.usage-bar-row {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.usage-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.usage-bar-header .key {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.usage-bar-stats {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-bright);
+}
+
+.usage-bar-stats .dim {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.usage-bar-track {
+  height: 4px;
+  background: var(--border);
+  width: 100%;
+}
+
+.usage-bar-fill {
+  height: 100%;
+  transition: width 0.5s ease;
+}
+
 .logs {
   background: var(--surface);
   border: 1px solid var(--border);
