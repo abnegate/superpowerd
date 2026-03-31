@@ -93,9 +93,9 @@ body::after{
   width:6px;height:6px;
   background:var(--green);
   display:inline-block;
-  animation:blink 2s step-end infinite;
+  animation:blink 3s ease-in-out infinite;
 }
-@keyframes blink{50%{opacity:0}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
 
 /* ── hero ──────────────────────────────────────── */
 
@@ -442,10 +442,10 @@ footer a:hover{color:var(--green)}
   background:var(--green);
   margin-left:4px;
   vertical-align:middle;
-  animation:cursorblink 1s step-end infinite;
+  animation:cursorblink 2.5s ease-in-out infinite;
 }
 
-@keyframes cursorblink{50%{opacity:0}}
+@keyframes cursorblink{0%,100%{opacity:1}50%{opacity:0.15}}
 </style>
 </head>
 <body>
