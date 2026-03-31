@@ -298,7 +298,9 @@ export default function App() {
               </div>
               <div className="auth-row">
                 <span className="key">api value</span>
-                <span className="value cost">${formatNumber(usage?.totals.cost ?? 0)}</span>
+                <span className="value cost" title="What this usage would cost at API pay-as-you-go rates (all accounts, since first session)">
+                  ${(usage?.totals.cost ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </span>
               </div>
             </div>
           ) : (
