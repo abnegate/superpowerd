@@ -1,8 +1,9 @@
 import express, { type Request, type Response } from "express";
-import { readFileSync, existsSync } from "fs";
-import { execFile, spawn } from "child_process";
+import { readFileSync, existsSync, readdirSync, statSync } from "fs";
+import { execFile, execFileSync, spawn } from "child_process";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
+import { homedir } from "os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectDirectory = resolve(__dirname, "..");
@@ -13,6 +14,9 @@ const monitorPidPath = join(dataDirectory, "monitor.pid");
 const monitorLogPath = join(dataDirectory, "monitor.log");
 const rotatePath = join(projectDirectory, "rotation", "rotate");
 const monitorPath = join(projectDirectory, "rotation", "monitor");
+const statsPath = join(homedir(), ".claude", "stats-cache.json");
+const sessionsDirectory = join(homedir(), ".claude", "sessions");
+const debugDirectory = join(homedir(), ".claude", "debug");
 
 interface State {
   current: number;
@@ -159,6 +163,118 @@ app.get("/api/logs", (request: Request, response: Response) => {
   });
 
   request.on("close", () => tail.kill());
+});
+
+app.get("/api/usage", (_: Request, response: Response) => {
+  // Active sessions
+  let activeSessions = 0;
+  try {
+    const files = readdirSync(sessionsDirectory).filter((f) => f.endsWith(".json"));
+    for (const file of files) {
+      try {
+        const session = JSON.parse(readFileSync(join(sessionsDirectory, file), "utf8"));
+        process.kill(session.pid, 0);
+        activeSessions++;
+      } catch {}
+    }
+  } catch {}
+
+  // Stats from Claude's cache
+  let todayMessages = 0;
+  let todayTokens = 0;
+  let todayTools = 0;
+  let totalTokens = 0;
+  let totalMessages = 0;
+  let totalSessions = 0;
+  const dailyActivity: Array<{ date: string; messages: number; tokens: number }> = [];
+
+  try {
+    const stats = JSON.parse(readFileSync(statsPath, "utf8"));
+    totalMessages = stats.totalMessages || 0;
+    totalSessions = stats.totalSessions || 0;
+
+    // Model usage totals
+    if (stats.modelUsage) {
+      for (const model of Object.values(stats.modelUsage) as Array<Record<string, number>>) {
+        totalTokens += (model.inputTokens || 0) + (model.outputTokens || 0);
+      }
+    }
+
+    // Daily activity (last 14 days)
+    const activity = stats.dailyActivity || [];
+    const modelTokens = stats.dailyModelTokens || [];
+    const tokensByDate: Record<string, number> = {};
+    for (const entry of modelTokens) {
+      let total = 0;
+      for (const count of Object.values(entry.tokensByModel || {}) as number[]) {
+        total += count;
+      }
+      tokensByDate[entry.date] = total;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    for (const entry of activity.slice(-14)) {
+      const tokens = tokensByDate[entry.date] || 0;
+      dailyActivity.push({ date: entry.date, messages: entry.messageCount, tokens });
+      if (entry.date === today) {
+        todayMessages = entry.messageCount;
+        todayTools = entry.toolCallCount;
+        todayTokens = tokens;
+      }
+    }
+  } catch {}
+
+  // Today's rate limit signals from debug logs
+  let rateLimitCount = 0;
+  try {
+    const debugFiles = readdirSync(debugDirectory)
+      .filter((f) => f.endsWith(".txt"))
+      .map((f) => ({ name: f, mtime: statSync(join(debugDirectory, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(0, 3);
+
+    for (const file of debugFiles) {
+      try {
+        const content = readFileSync(join(debugDirectory, file.name), "utf8");
+        const today = new Date().toISOString().slice(0, 10);
+        for (const line of content.split("\n")) {
+          if (!line.startsWith(today)) continue;
+          if (/status=429|Rate limited|rate_limit|overloaded|status=529/i.test(line)) {
+            if (!line.includes("client_data")) rateLimitCount++;
+          }
+        }
+      } catch {}
+    }
+  } catch {}
+
+  // Token expiry from stored tokens
+  let tokenExpiry: string | null = null;
+  try {
+    const tokens = JSON.parse(readFileSync(join(dataDirectory, "tokens.json"), "utf8"));
+    const authResult = execFileSync("claude", ["auth", "status"], { encoding: "utf8", timeout: 5000 });
+    const authData = JSON.parse(authResult);
+    const stored = tokens[authData.email];
+    if (stored?.expiresAt) {
+      tokenExpiry = new Date(stored.expiresAt).toISOString();
+    }
+  } catch {}
+
+  response.json({
+    activeSessions,
+    today: {
+      messages: todayMessages,
+      tokens: todayTokens,
+      tools: todayTools,
+      rateLimits: rateLimitCount,
+    },
+    totals: {
+      messages: totalMessages,
+      tokens: totalTokens,
+      sessions: totalSessions,
+    },
+    tokenExpiry,
+    dailyActivity,
+  });
 });
 
 app.get("/api/auth", (_: Request, response: Response) => {
