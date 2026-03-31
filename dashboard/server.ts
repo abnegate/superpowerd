@@ -510,6 +510,116 @@ app.get("/api/claude-usage", async (_: Request, response: Response) => {
   });
 });
 
+// Per-session cost tracking
+const pricingRates = {
+  input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25,
+};
+
+app.get("/api/sessions", (_: Request, response: Response) => {
+  const sessions: Array<{
+    pane: number | null;
+    session: string;
+    cwd: string;
+    repo: string;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    cost: number;
+    messages: number;
+  }> = [];
+
+  // Map TTY -> pane ID for active panes
+  let ttyToPaneId: Record<string, number> = {};
+  try {
+    const list = execFileSync("wezterm", ["cli", "list", "--format", "json"], {
+      encoding: "utf8", timeout: 5000,
+    });
+    const panes = JSON.parse(list);
+    for (const p of panes) {
+      const tty = (p.tty_name || "").replace("/dev/", "");
+      if (tty) ttyToPaneId[tty] = p.pane_id;
+    }
+  } catch {}
+
+  // Map PID -> TTY from ps
+  let pidToTty: Record<string, string> = {};
+  try {
+    const ps = execFileSync("ps", ["-eo", "pid,tty,comm"], { encoding: "utf8", timeout: 3000 });
+    for (const line of ps.split("\n")) {
+      if (line.includes("claude")) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 3) pidToTty[parts[0]] = parts[1];
+      }
+    }
+  } catch {}
+
+  // Read each active session file
+  try {
+    const files = readdirSync(sessionsDirectory).filter((f) => f.endsWith(".json"));
+    for (const file of files) {
+      try {
+        const session = JSON.parse(readFileSync(join(sessionsDirectory, file), "utf8"));
+        process.kill(session.pid, 0); // throws if not alive
+
+        const tty = pidToTty[String(session.pid)] || "";
+        const paneId = tty ? (ttyToPaneId[tty] ?? null) : null;
+        const repo = (session.cwd || "").split("/").pop() || session.cwd || "";
+
+        // Find the session's transcript file and sum usage
+        let input = 0, output = 0, cacheRead = 0, cacheWrite = 0, messages = 0;
+        const projectDirs = [
+          join(homedir(), ".claude", "projects", "-" + (session.cwd || "").replace(/\//g, "-")),
+          join(homedir(), ".claude", "projects", "-Users-" + (session.cwd || "").split("/Users/")[1]?.replace(/\//g, "-")),
+        ];
+
+        for (const projectDir of projectDirs) {
+          const transcript = join(projectDir, session.sessionId + ".jsonl");
+          if (!existsSync(transcript)) continue;
+
+          const content = readFileSync(transcript, "utf8");
+          for (const line of content.split("\n")) {
+            if (!line.includes('"usage"')) continue;
+            try {
+              const entry = JSON.parse(line);
+              const u = entry.usage || entry.message?.usage;
+              if (!u) continue;
+              input += u.input_tokens || 0;
+              output += u.output_tokens || 0;
+              cacheRead += u.cache_read_input_tokens || 0;
+              cacheWrite += u.cache_creation_input_tokens || 0;
+              messages++;
+            } catch {}
+          }
+          break;
+        }
+
+        const cost = (input / 1e6) * pricingRates.input
+          + (output / 1e6) * pricingRates.output
+          + (cacheRead / 1e6) * pricingRates.cacheRead
+          + (cacheWrite / 1e6) * pricingRates.cacheWrite;
+
+        sessions.push({
+          pane: paneId,
+          session: session.sessionId,
+          cwd: session.cwd,
+          repo,
+          input, output, cacheRead, cacheWrite,
+          cost: Math.round(cost * 100) / 100,
+          messages,
+        });
+      } catch {}
+    }
+  } catch {}
+
+  sessions.sort((a, b) => b.cost - a.cost);
+
+  response.json({
+    sessions,
+    totalCost: Math.round(sessions.reduce((s, x) => s + x.cost, 0) * 100) / 100,
+  });
+});
+
 app.get("/api/auth", (_: Request, response: Response) => {
   execFile("claude", ["auth", "status"], { timeout: 5000 }, (error, stdout) => {
     if (error) {

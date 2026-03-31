@@ -163,22 +163,24 @@ export default function App() {
   const [auth, setAuth] = useState<AuthInfo | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [claudeUsage, setClaudeUsage] = useState<any>(null);
+  const [sessions, setSessions] = useState<any>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [rotating, setRotating] = useState(false);
   const logsEnd = useRef<HTMLDivElement>(null);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [s, a, u] = await Promise.all([
+      const [s, a, u, sess] = await Promise.all([
         fetch("/api/status"),
         fetch("/api/auth"),
         fetch("/api/usage"),
+        fetch("/api/sessions"),
       ]);
       setStatus(await s.json());
       setAuth(await a.json());
       setUsage(await u.json());
+      setSessions(await sess.json());
     } catch {}
-    // Fetch Claude usage separately (may be rate limited)
     try {
       const cu = await fetch("/api/claude-usage");
       const data = await cu.json();
@@ -392,6 +394,34 @@ export default function App() {
                 ) : null
               ))}
             </div>
+          </div>
+        )}
+
+        {sessions?.sessions?.length > 0 && (
+          <div className="card full">
+            <h2>// sessions ({sessions.sessions.length} active, ${sessions.totalCost} api value)</h2>
+            <table className="sessions-table">
+              <thead>
+                <tr>
+                  <th>repo</th>
+                  <th>messages</th>
+                  <th>output</th>
+                  <th>cache</th>
+                  <th>cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.sessions.map((s: any) => (
+                  <tr key={s.session}>
+                    <td className="session-repo">{s.repo}</td>
+                    <td>{formatNumber(s.messages)}</td>
+                    <td>{formatNumber(s.output)}</td>
+                    <td>{formatNumber(s.cacheRead)}</td>
+                    <td className="session-cost">${s.cost.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 

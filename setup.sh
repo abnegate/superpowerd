@@ -156,6 +156,32 @@ for cmd in "$PROJECT_DIR"/commands/*.md; do
   [[ -f "$cmd" ]] && ln -sf "$cmd" "$COMMANDS_DIR/$(basename "$cmd")"
 done
 
+# Install SessionStart hook for auto token capture
+echo "==> Auto-capture hook"
+SETTINGS_FILE="$HOME/.claude/settings.json"
+if [ -f "$SETTINGS_FILE" ]; then
+  node -e "
+    var fs = require('fs');
+    var settings = JSON.parse(fs.readFileSync('$SETTINGS_FILE', 'utf8'));
+    if (!settings.hooks) settings.hooks = {};
+    if (!settings.hooks.SessionStart) settings.hooks.SessionStart = [];
+    var hookCmd = '$PROJECT_DIR/rotation/capture-hook';
+    var exists = settings.hooks.SessionStart.some(function(h) {
+      return h.hooks && h.hooks.some(function(hh) { return hh.command && hh.command.includes('capture-hook'); });
+    });
+    if (!exists) {
+      settings.hooks.SessionStart.push({
+        matcher: '',
+        hooks: [{ type: 'command', command: hookCmd }]
+      });
+      fs.writeFileSync('$SETTINGS_FILE', JSON.stringify(settings, null, 2) + '\n');
+      console.log('    Installed SessionStart hook');
+    } else {
+      console.log('    Hook already installed');
+    }
+  "
+fi
+
 # Install persistent monitor
 echo "==> Monitor service"
 NODE_PATH=$(which node)

@@ -543,6 +543,45 @@ button.danger:hover {
   font-size: 10px;
 }
 
+.sessions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.sessions-table th {
+  text-align: left;
+  padding: 8px 0;
+  color: var(--muted);
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 10px;
+  border-bottom: 1px solid var(--border-bright);
+}
+
+.sessions-table td {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.sessions-table th:not(:first-child),
+.sessions-table td:not(:first-child) {
+  text-align: right;
+}
+
+.session-repo {
+  color: var(--text-bright);
+  font-weight: 500;
+}
+
+.session-cost {
+  color: var(--bright-green);
+  font-weight: 500;
+}
+
 .empty {
   color: var(--muted);
   font-family: var(--mono);

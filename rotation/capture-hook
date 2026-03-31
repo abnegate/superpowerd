@@ -1,0 +1,6 @@
+#!/bin/bash
+# Hook script: captures OAuth tokens + org ID for the current account.
+# Runs on SessionStart so tokens stay fresh across logins and rotations.
+# Silently no-ops if capture fails (doesn't block Claude startup).
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+node "$SCRIPT_DIR/tokens.js" capture >/dev/null 2>&1 &
