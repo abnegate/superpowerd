@@ -459,40 +459,25 @@ app.get("/api/claude-usage", async (_: Request, response: Response) => {
         staleMinutes: Math.round(age / 60000),
       };
     } else {
-      // Estimate usage for accounts without data based on known accounts
-      const liveAccount = Object.entries(results).find(([, r]: [string, any]) => r.live && r.five_hour);
-      if (liveAccount) {
-        const [liveEmail, liveData] = liveAccount as [string, any];
-        // jake@appwrite.io uses ~1/4 of the personal accounts
-        const scale = email.includes("appwrite") ? 0.25 : 1.0;
-        results[email] = {
-          five_hour: {
-            utilization: Math.round(liveData.five_hour.utilization * scale),
-            resets_at: liveData.five_hour.resets_at,
-          },
-          seven_day: {
-            utilization: Math.round(liveData.seven_day.utilization * scale),
-            resets_at: liveData.seven_day.resets_at,
-          },
-          estimated: true,
-          live: false,
-          basedOn: liveEmail,
-          scale,
-        };
-      } else {
-        results[email] = { error: "no data" };
-      }
+      results[email] = { error: "no data yet" };
     }
   }
 
-  // Pooled: use all accounts that have data (live, snapshot, or estimated)
+  // Pooled: only the active account is burning capacity right now.
+  // All accounts share the same rate limit ceiling, so pooled utilization =
+  // active account's usage / total number of accounts (each is a full slot).
+  // Accounts with snapshots contribute their last-known usage.
+  const totalAccounts = accounts.length;
   const withData = Object.values(results).filter((r: any) => r.five_hour && !r.error);
-  const pooledFiveHour = withData.length > 0
-    ? withData.reduce((sum: number, r: any) => sum + r.five_hour.utilization, 0) / withData.length
-    : null;
-  const pooledSevenDay = withData.length > 0
-    ? withData.reduce((sum: number, r: any) => sum + r.seven_day.utilization, 0) / withData.length
-    : null;
+  let sumFiveHour = 0;
+  let sumSevenDay = 0;
+  for (const r of withData) {
+    sumFiveHour += (r as any).five_hour.utilization;
+    sumSevenDay += (r as any).seven_day.utilization;
+  }
+  // Accounts without data are assumed idle (0% usage)
+  const pooledFiveHour = totalAccounts > 0 ? Math.round(sumFiveHour / totalAccounts) : null;
+  const pooledSevenDay = totalAccounts > 0 ? Math.round(sumSevenDay / totalAccounts) : null;
 
   // Swap estimate from burn rate
   let estimatedSwapMinutes: number | null = null;
