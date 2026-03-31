@@ -458,14 +458,34 @@ app.get("/api/claude-usage", async (_: Request, response: Response) => {
         live: false,
         staleMinutes: Math.round(age / 60000),
       };
-    } else if (!orgMap[email]) {
-      results[email] = { error: "not captured yet" };
     } else {
-      results[email] = { error: "no data — will update on next rotation" };
+      // Estimate usage for accounts without data based on known accounts
+      const liveAccount = Object.entries(results).find(([, r]: [string, any]) => r.live && r.five_hour);
+      if (liveAccount) {
+        const [liveEmail, liveData] = liveAccount as [string, any];
+        // jake@appwrite.io uses ~1/4 of the personal accounts
+        const scale = email.includes("appwrite") ? 0.25 : 1.0;
+        results[email] = {
+          five_hour: {
+            utilization: Math.round(liveData.five_hour.utilization * scale),
+            resets_at: liveData.five_hour.resets_at,
+          },
+          seven_day: {
+            utilization: Math.round(liveData.seven_day.utilization * scale),
+            resets_at: liveData.seven_day.resets_at,
+          },
+          estimated: true,
+          live: false,
+          basedOn: liveEmail,
+          scale,
+        };
+      } else {
+        results[email] = { error: "no data" };
+      }
     }
   }
 
-  // Pooled: use all accounts that have data (live or snapshot)
+  // Pooled: use all accounts that have data (live, snapshot, or estimated)
   const withData = Object.values(results).filter((r: any) => r.five_hour && !r.error);
   const pooledFiveHour = withData.length > 0
     ? withData.reduce((sum: number, r: any) => sum + r.five_hour.utilization, 0) / withData.length

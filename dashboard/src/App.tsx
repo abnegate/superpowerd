@@ -339,7 +339,7 @@ export default function App() {
                         <div className="auth-row section-break">
                           <span className="key">{email.split("@")[0]}</span>
                           <span className="value dim">
-                            {data.live ? "live" : data.staleMinutes !== undefined ? data.staleMinutes + "m ago" : ""}
+                            {data.live ? "live" : data.estimated ? "~est" : data.staleMinutes !== undefined ? data.staleMinutes + "m ago" : ""}
                           </span>
                         </div>
                         <UsageBar label="5-hour" percent={data.five_hour.utilization} reset={data.live ? data.five_hour.resets_at : null} />
