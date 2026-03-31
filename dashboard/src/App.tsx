@@ -140,6 +140,7 @@ export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [auth, setAuth] = useState<AuthInfo | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [claudeUsage, setClaudeUsage] = useState<Record<string, unknown> | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [rotating, setRotating] = useState(false);
   const logsEnd = useRef<HTMLDivElement>(null);
@@ -154,6 +155,12 @@ export default function App() {
       setStatus(await s.json());
       setAuth(await a.json());
       setUsage(await u.json());
+    } catch {}
+    // Fetch Claude usage separately (may be rate limited)
+    try {
+      const cu = await fetch("/api/claude-usage");
+      const data = await cu.json();
+      if (!data.error) setClaudeUsage(data);
     } catch {}
   }, []);
 
@@ -290,6 +297,20 @@ export default function App() {
                 <span className="key">org</span>
                 <span className="value">{auth.orgName}</span>
               </div>
+              {claudeUsage && (
+                <>
+                  <div className="auth-row section-break">
+                    <span className="key">current usage</span>
+                    <span className="value dim" />
+                  </div>
+                  {Object.entries(claudeUsage).filter(([k]) => k !== "error").map(([key, value]) => (
+                    <div className="auth-row" key={key}>
+                      <span className="key">{key.replace(/_/g, " ")}</span>
+                      <span className="value">{typeof value === "object" ? JSON.stringify(value) : String(value)}</span>
+                    </div>
+                  ))}
+                </>
+              )}
               <div className="auth-row section-break">
                 <span className="key">all accounts</span>
                 <span className="value dim" />

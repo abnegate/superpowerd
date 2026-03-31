@@ -4,6 +4,7 @@ import { execFile, execFileSync, spawn } from "child_process";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
+import https from "https";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectDirectory = resolve(__dirname, "..");
@@ -300,6 +301,64 @@ app.get("/api/usage", (_: Request, response: Response) => {
     tokenExpiry,
     dailyActivity,
   });
+});
+
+// Cached usage from Anthropic's OAuth usage endpoint (rate-limited, cache 5 min)
+let cachedClaudeUsage: { data: unknown; fetchedAt: number } | null = null;
+
+app.get("/api/claude-usage", (_: Request, response: Response) => {
+  const now = Date.now();
+  if (cachedClaudeUsage && now - cachedClaudeUsage.fetchedAt < 300000) {
+    response.json(cachedClaudeUsage.data);
+    return;
+  }
+
+  // Read OAuth token from keychain
+  try {
+    const password = execFileSync("security", [
+      "find-generic-password", "-s", "Claude Code-credentials", "-w"
+    ], { encoding: "utf8", timeout: 5000 }).trim();
+    const credentials = JSON.parse(password);
+    const token = credentials.claudeAiOauth?.accessToken;
+    if (!token) {
+      response.json({ error: "no token" });
+      return;
+    }
+
+    const options = {
+      hostname: "api.anthropic.com",
+      path: "/api/oauth/usage",
+      method: "GET",
+      headers: { "Authorization": "Bearer " + token },
+    };
+
+    const request = https.request(options, (upstream: any) => {
+      const chunks: Buffer[] = [];
+      upstream.on("data", (chunk: Buffer) => chunks.push(chunk));
+      upstream.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8");
+        try {
+          const data = JSON.parse(body);
+          if (!data.error) {
+            cachedClaudeUsage = { data, fetchedAt: now };
+          }
+          response.json(data);
+        } catch {
+          response.json({ error: "parse error", raw: body });
+        }
+      });
+    });
+    request.on("error", (error: Error) => {
+      response.json({ error: error.message });
+    });
+    request.setTimeout(10000, () => {
+      request.destroy();
+      response.json({ error: "timeout" });
+    });
+    request.end();
+  } catch (error: any) {
+    response.json({ error: error.message });
+  }
 });
 
 app.get("/api/auth", (_: Request, response: Response) => {
