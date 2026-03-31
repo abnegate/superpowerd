@@ -89,6 +89,13 @@ mkdir -p "$HOME/.config/skhd"
 skhd --install-service 2>/dev/null || true
 skhd --restart-service 2>/dev/null || true
 
+# Local DNS
+echo "==> Local hostname"
+if ! grep -q "superpowerd.local" /etc/hosts 2>/dev/null; then
+  echo '127.0.0.1 superpowerd.local' | sudo tee -a /etc/hosts >/dev/null
+  echo "    Added superpowerd.local -> 127.0.0.1"
+fi
+
 # .zshrc modifications
 echo "==> Shell config"
 ZSHRC="$HOME/.zshrc"
