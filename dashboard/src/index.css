@@ -255,6 +255,21 @@ button.danger:hover {
   font-weight: 700;
 }
 
+.auth-row .value.dim {
+  color: var(--muted);
+}
+
+.auth-row.section-break {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-bright);
+}
+
+.auth-row.section-break .key {
+  color: var(--green);
+  font-weight: 500;
+}
+
 .logs {
   background: var(--surface);
   border: 1px solid var(--border);

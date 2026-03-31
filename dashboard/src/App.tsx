@@ -290,15 +290,25 @@ export default function App() {
                 <span className="key">org</span>
                 <span className="value">{auth.orgName}</span>
               </div>
+              <div className="auth-row section-break">
+                <span className="key">all accounts</span>
+                <span className="value dim" />
+              </div>
               <div className="auth-row">
-                <span className="key">lifetime</span>
-                <span className="value">
-                  {formatNumber(usage?.totals.sessions ?? 0)} sessions / {formatNumber(usage?.totals.messages ?? 0)} msgs
-                </span>
+                <span className="key">sessions</span>
+                <span className="value">{formatNumber(usage?.totals.sessions ?? 0)}</span>
+              </div>
+              <div className="auth-row">
+                <span className="key">messages</span>
+                <span className="value">{formatNumber(usage?.totals.messages ?? 0)}</span>
+              </div>
+              <div className="auth-row">
+                <span className="key">tokens</span>
+                <span className="value">{formatNumber(usage?.totals.tokens ?? 0)}</span>
               </div>
               <div className="auth-row">
                 <span className="key">api value</span>
-                <span className="value cost" title="What this usage would cost at API pay-as-you-go rates (all accounts, since first session)">
+                <span className="value cost">
                   ${(usage?.totals.cost ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 </span>
               </div>
