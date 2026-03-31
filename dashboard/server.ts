@@ -194,15 +194,15 @@ app.get("/api/usage", (_: Request, response: Response) => {
     totalMessages = stats.totalMessages || 0;
     totalSessions = stats.totalSessions || 0;
 
-    // Per-million-token pricing (USD)
+    // Per-million-token pricing (USD) — from anthropic.com/pricing
     const pricing: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {
-      "claude-opus-4-6":            { input: 15,  output: 75,  cacheRead: 1.5,  cacheWrite: 18.75 },
-      "claude-opus-4-5-20251101":   { input: 15,  output: 75,  cacheRead: 1.5,  cacheWrite: 18.75 },
-      "claude-sonnet-4-6":          { input: 3,   output: 15,  cacheRead: 0.3,  cacheWrite: 3.75 },
-      "claude-sonnet-4-5-20250929": { input: 3,   output: 15,  cacheRead: 0.3,  cacheWrite: 3.75 },
-      "claude-haiku-4-5-20251001":  { input: 0.8, output: 4,   cacheRead: 0.08, cacheWrite: 1 },
+      "claude-opus-4-6":            { input: 5,  output: 25,  cacheRead: 0.50,  cacheWrite: 6.25 },
+      "claude-opus-4-5-20251101":   { input: 5,  output: 25,  cacheRead: 0.50,  cacheWrite: 6.25 },
+      "claude-sonnet-4-6":          { input: 3,  output: 15,  cacheRead: 0.30,  cacheWrite: 3.75 },
+      "claude-sonnet-4-5-20250929": { input: 3,  output: 15,  cacheRead: 0.30,  cacheWrite: 3.75 },
+      "claude-haiku-4-5-20251001":  { input: 1,  output: 5,   cacheRead: 0.10,  cacheWrite: 1.25 },
     };
-    const fallbackPricing = { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 };
+    const fallbackPricing = { input: 3, output: 15, cacheRead: 0.30, cacheWrite: 3.75 };
 
     // Model usage totals + cost calculation
     if (stats.modelUsage) {
