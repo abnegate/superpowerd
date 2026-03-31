@@ -57,7 +57,7 @@ function formatLogLine(line: string): ReactNode {
   );
 }
 
-function Sparkline({ data, height = 48 }: { data: number[]; height?: number }) {
+function Sparkline({ data, height = 80 }: { data: number[]; height?: number }) {
   if (data.length < 2) return <div className="sparkline-empty">no data</div>;
   const max = Math.max(...data, 1);
   const width = 200;
@@ -319,45 +319,8 @@ export default function App() {
                 <span className="key">org</span>
                 <span className="value">{auth.orgName}</span>
               </div>
-              {claudeUsage?.accounts && (
-                <>
-                  {claudeUsage.pooled?.fiveHour !== null && (
-                    <>
-                      <div className="auth-row section-break">
-                        <span className="key">pool ({claudeUsage.pooled.accountCount} accounts)</span>
-                        {claudeUsage.estimatedSwapMinutes !== null && (
-                          <span className="value dim">swap in ~{claudeUsage.estimatedSwapMinutes}m</span>
-                        )}
-                      </div>
-                      <UsageBar label="5h pooled" percent={claudeUsage.pooled.fiveHour} reset={null} />
-                      <UsageBar label="7d pooled" percent={claudeUsage.pooled.sevenDay} reset={null} />
-                    </>
-                  )}
-                  {Object.entries(claudeUsage.accounts).map(([email, data]: [string, any]) => (
-                    data?.five_hour && !data.error ? (
-                      <div key={email}>
-                        <div className="auth-row section-break">
-                          <span className="key">{email.split("@")[0]}</span>
-                          <span className="value dim">
-                            {data.live ? "live" : data.estimated ? "~est" : data.staleMinutes !== undefined ? data.staleMinutes + "m ago" : ""}
-                          </span>
-                        </div>
-                        <UsageBar label="5-hour" percent={data.five_hour.utilization} reset={data.live ? data.five_hour.resets_at : null} />
-                        <UsageBar label="7-day" percent={data.seven_day.utilization} reset={data.live ? data.seven_day.resets_at : null} />
-                      </div>
-                    ) : data?.error ? (
-                      <div key={email}>
-                        <div className="auth-row section-break">
-                          <span className="key">{email.split("@")[0]}</span>
-                          <span className="value dim">{data.error}</span>
-                        </div>
-                      </div>
-                    ) : null
-                  ))}
-                </>
-              )}
               <div className="auth-row section-break">
-                <span className="key">all accounts</span>
+                <span className="key">lifetime</span>
                 <span className="value dim" />
               </div>
               <div className="auth-row">
@@ -390,6 +353,47 @@ export default function App() {
             )}
           </div>
         </div>
+
+        {claudeUsage?.accounts && (
+          <div className="card full">
+            <h2>// usage</h2>
+            {claudeUsage.pooled?.fiveHour !== null && (
+              <div className="usage-pool">
+                <div className="usage-pool-header">
+                  <span>pool ({claudeUsage.pooled.accountCount} accounts)</span>
+                  {claudeUsage.estimatedSwapMinutes !== null && (
+                    <span className="dim">swap in ~{claudeUsage.estimatedSwapMinutes}m</span>
+                  )}
+                </div>
+                <UsageBar label="5-hour" percent={claudeUsage.pooled.fiveHour} reset={null} />
+                <UsageBar label="7-day" percent={claudeUsage.pooled.sevenDay} reset={null} />
+              </div>
+            )}
+            <div className="usage-accounts">
+              {Object.entries(claudeUsage.accounts).map(([email, data]: [string, any]) => (
+                data?.five_hour && !data.error ? (
+                  <div key={email} className="usage-account">
+                    <div className="usage-account-header">
+                      <span>{email.split("@")[0]}</span>
+                      <span className="dim">
+                        {data.live ? "live" : data.staleMinutes !== undefined ? data.staleMinutes + "m ago" : ""}
+                      </span>
+                    </div>
+                    <UsageBar label="5-hour" percent={data.five_hour.utilization} reset={data.live ? data.five_hour.resets_at : null} />
+                    <UsageBar label="7-day" percent={data.seven_day.utilization} reset={data.live ? data.seven_day.resets_at : null} />
+                  </div>
+                ) : data?.error ? (
+                  <div key={email} className="usage-account">
+                    <div className="usage-account-header">
+                      <span>{email.split("@")[0]}</span>
+                      <span className="dim">{data.error}</span>
+                    </div>
+                  </div>
+                ) : null
+              ))}
+            </div>
+          </div>
+        )}
 
         {usage && usage.dailyActivity.length > 1 && (
           <div className="card full">
