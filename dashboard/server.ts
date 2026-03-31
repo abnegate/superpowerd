@@ -273,15 +273,15 @@ app.get("/api/usage", (_: Request, response: Response) => {
     }
   } catch {}
 
-  // Token expiry from stored tokens
+  // Token expiry from live keychain (not the stale stored copy)
   let tokenExpiry: string | null = null;
   try {
-    const tokens = JSON.parse(readFileSync(join(dataDirectory, "tokens.json"), "utf8"));
-    const authResult = execFileSync("claude", ["auth", "status"], { encoding: "utf8", timeout: 5000 });
-    const authData = JSON.parse(authResult);
-    const stored = tokens[authData.email];
-    if (stored?.expiresAt) {
-      tokenExpiry = new Date(stored.expiresAt).toISOString();
+    const password = execFileSync("security", [
+      "find-generic-password", "-s", "Claude Code-credentials", "-w"
+    ], { encoding: "utf8", timeout: 5000 }).trim();
+    const credentials = JSON.parse(password);
+    if (credentials.claudeAiOauth?.expiresAt) {
+      tokenExpiry = new Date(credentials.claudeAiOauth.expiresAt).toISOString();
     }
   } catch {}
 
@@ -346,7 +346,9 @@ function getSessionKey(): string {
       if (buf.length > 3 && buf.subarray(0, 3).toString() === "v10") {
         const decipher = crypto.createDecipheriv("aes-128-cbc", key, iv);
         decipher.setAutoPadding(true);
-        return Buffer.concat([decipher.update(buf.subarray(3)), decipher.final()]).toString("utf8");
+        const decrypted = Buffer.concat([decipher.update(buf.subarray(3)), decipher.final()]).toString("utf8");
+        // Validate: session keys are printable ASCII starting with sk-ant-sid
+        if (/^[\x20-\x7e]+$/.test(decrypted)) return decrypted;
       }
     }
   } catch {}
