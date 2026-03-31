@@ -233,14 +233,14 @@ export function BarChart({
     );
   }
 
-  const barWidth = Math.min(32, Math.max(8, Math.floor(400 / data.length) - 4));
-  const gap = Math.max(2, Math.floor(barWidth * 0.25));
-  const totalWidth = data.length * (barWidth + gap);
+  const totalWidth = 1000;
+  const gap = Math.max(2, Math.floor((totalWidth / data.length) * 0.15));
+  const barWidth = (totalWidth - gap * data.length) / data.length;
   const svgHeight = height;
 
   return (
     <div className="bar-chart-container" style={{ position: "relative" }}>
-      <svg viewBox={`0 0 ${totalWidth} ${svgHeight + 24}`} className="bar-chart-svg" preserveAspectRatio="xMidYMax meet" style={{ height: svgHeight + 24 }}>
+      <svg viewBox={`0 0 ${totalWidth} ${svgHeight + 24}`} className="bar-chart-svg" preserveAspectRatio="none" style={{ width: "100%", height: svgHeight + 24 }}>
         {data.map((value, i) => {
           const barH = (value / max) * (svgHeight - 8);
           const x = i * (barWidth + gap);
