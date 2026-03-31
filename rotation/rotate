@@ -1,5 +1,11 @@
 #!/bin/bash
 # Rotate to the next Claude account.
+#
+# Seamless flow:
+#   1. Swap OAuth tokens in the keychain (instant)
+#   2. Restart Claude in each WezTerm pane with --continue (preserves context)
+#   3. Each new process reads the new token from keychain
+#
 # Usage:
 #   rotate              # Next account
 #   rotate <email>      # Specific account
@@ -74,6 +80,7 @@ if [[ "${1:-}" == "--status" ]]; then
     echo "  [$i] ${ACCOUNTS[$i]}$marker"
   done
   echo ""
+  node "$SCRIPT_DIR/tokens.js" list 2>/dev/null || true
   claude auth status 2>/dev/null || echo "(CLI not authenticated)"
   exit 0
 fi
@@ -103,16 +110,26 @@ fi
 log "=== Rotating: $CURRENT_EMAIL -> $NEXT_EMAIL ==="
 notify "Rotating to $NEXT_EMAIL..."
 
-log "Step 1: CLI logout"
-claude auth logout 2>/dev/null || true
+# Step 1: Capture current account's tokens before we lose them
+log "Step 1: Saving current tokens"
+node "$SCRIPT_DIR/tokens.js" capture 2>&1 | while read -r line; do log "  $line"; done
 
-log "Step 2: Browser auth"
-node "$SCRIPT_DIR/browser-auth.js" login "$NEXT_EMAIL" 2>&1 | while read -r line; do log "  $line"; done
+# Step 2: Swap keychain to the next account (instant)
+log "Step 2: Swapping keychain tokens"
+if ! node "$SCRIPT_DIR/tokens.js" swap "$NEXT_EMAIL" 2>&1 | while read -r line; do log "  $line"; done; then
+  log "No stored tokens for $NEXT_EMAIL — falling back to browser auth"
+  claude auth logout 2>/dev/null || true
+  node "$SCRIPT_DIR/browser-auth.js" login "$NEXT_EMAIL" 2>&1 | while read -r line; do log "  $line"; done
+  # Capture the new tokens for next time
+  node "$SCRIPT_DIR/tokens.js" capture 2>&1 | while read -r line; do log "  $line"; done
+fi
 
+# Step 3: Update state
 log "Step 3: State update"
 update_state "$NEXT_INDEX" "$NEXT_EMAIL"
 
-log "Step 4: Re-auth terminals"
+# Step 4: Restart Claude in all WezTerm panes with --continue
+log "Step 4: Restarting agents"
 if command -v wezterm &>/dev/null; then
   PANE_IDS=$(wezterm cli list 2>/dev/null | tail -n +2 | awk '{print $3}' || true)
   CURRENT_PANE=${WEZTERM_PANE:-}
@@ -121,13 +138,14 @@ if command -v wezterm &>/dev/null; then
     [[ "$pane_id" == "$CURRENT_PANE" ]] && continue
     TEXT=$(wezterm cli get-text --pane-id "$pane_id" 2>/dev/null | tail -5 || true)
     if echo "$TEXT" | grep -qiE '(claude|[>❯✻✽]|\/login|\$ claude)'; then
-      log "  /login -> pane $pane_id"
-      wezterm cli send-text --pane-id "$pane_id" --no-paste $'\x1b' 2>/dev/null || true
-      sleep 0.3
-      wezterm cli send-text --pane-id "$pane_id" "/login" 2>/dev/null || true
-      sleep 0.2
+      log "  Restarting pane $pane_id"
+      # Send Ctrl+C to kill the current Claude process
+      wezterm cli send-text --pane-id "$pane_id" --no-paste $'\x03' 2>/dev/null || true
+      sleep 0.5
+      # Restart Claude with --continue to resume the conversation
+      wezterm cli send-text --pane-id "$pane_id" "claude --dangerously-skip-permissions --continue" 2>/dev/null || true
       wezterm cli send-text --pane-id "$pane_id" --no-paste $'\r' 2>/dev/null || true
-      sleep 1
+      sleep 0.3
     fi
   done
 fi
@@ -136,4 +154,4 @@ log "=== Now using: $NEXT_EMAIL ==="
 notify "Now using $NEXT_EMAIL"
 echo ""
 echo "Switched to: $NEXT_EMAIL"
-echo "Confirm /login in any browser windows that opened."
+echo "All agents restarted with --continue (context preserved)."
