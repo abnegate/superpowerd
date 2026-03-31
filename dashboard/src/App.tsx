@@ -338,10 +338,19 @@ export default function App() {
                       <div key={email}>
                         <div className="auth-row section-break">
                           <span className="key">{email.split("@")[0]}</span>
-                          <span className="value dim">{email === claudeUsage.current ? "active" : ""}</span>
+                          <span className="value dim">
+                            {data.live ? "live" : data.staleMinutes !== undefined ? data.staleMinutes + "m ago" : ""}
+                          </span>
                         </div>
-                        <UsageBar label="5-hour" percent={data.five_hour.utilization} reset={data.five_hour.resets_at} />
-                        <UsageBar label="7-day" percent={data.seven_day.utilization} reset={data.seven_day.resets_at} />
+                        <UsageBar label="5-hour" percent={data.five_hour.utilization} reset={data.live ? data.five_hour.resets_at : null} />
+                        <UsageBar label="7-day" percent={data.seven_day.utilization} reset={data.live ? data.seven_day.resets_at : null} />
+                      </div>
+                    ) : data?.error ? (
+                      <div key={email}>
+                        <div className="auth-row section-break">
+                          <span className="key">{email.split("@")[0]}</span>
+                          <span className="value dim">{data.error}</span>
+                        </div>
                       </div>
                     ) : null
                   ))}

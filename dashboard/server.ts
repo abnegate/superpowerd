@@ -1,5 +1,5 @@
 import express, { type Request, type Response } from "express";
-import { readFileSync, existsSync, readdirSync, statSync, copyFileSync, unlinkSync } from "fs";
+import { readFileSync, existsSync, readdirSync, statSync, copyFileSync, unlinkSync, writeFileSync } from "fs";
 import { execFile, execFileSync, spawn } from "child_process";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -386,21 +386,27 @@ function readUsageHistory(): Record<string, Array<{ utilization: number; timesta
 }
 
 function writeUsageHistory(history: Record<string, Array<{ utilization: number; timestamp: number }>>) {
-  require("fs").writeFileSync(usageHistoryPath, JSON.stringify(history) + "\n");
+  writeFileSync(usageHistoryPath, JSON.stringify(history) + "\n");
+}
+
+const usageSnapshotPath = join(dataDirectory, "usage-snapshots.json");
+
+function readSnapshots(): Record<string, any> {
+  try { return JSON.parse(readFileSync(usageSnapshotPath, "utf8")); } catch { return {}; }
+}
+
+function writeSnapshot(email: string, data: any) {
+  const snapshots = readSnapshots();
+  snapshots[email] = { ...data, snapshotAt: Date.now() };
+  writeFileSync(usageSnapshotPath, JSON.stringify(snapshots, null, 2) + "\n");
 }
 
 app.get("/api/claude-usage", async (_: Request, response: Response) => {
-  const sessionKey = getSessionKey();
-  if (!sessionKey) {
-    response.json({ error: "no session cookie" });
-    return;
-  }
-
   const accounts = readAccounts();
   let tokens: Record<string, any> = {};
   try { tokens = JSON.parse(readFileSync(join(dataDirectory, "tokens.json"), "utf8")); } catch {}
 
-  // Get current account's org ID from CLI
+  // Get current account
   let currentEmail = "";
   let currentOrgId = "";
   try {
@@ -409,57 +415,66 @@ app.get("/api/claude-usage", async (_: Request, response: Response) => {
     currentOrgId = auth.orgId || "";
   } catch {}
 
-  // Build org ID map from tokens.json
   const orgMap: Record<string, string> = {};
   for (const email of accounts) {
     if (tokens[email]?.orgId) orgMap[email] = tokens[email].orgId;
   }
   if (currentEmail && currentOrgId) orgMap[currentEmail] = currentOrgId;
 
-  // Fetch usage for each account that has an org ID
   const now = Date.now();
   const results: Record<string, any> = {};
+  const snapshots = readSnapshots();
 
-  for (const email of accounts) {
-    const orgId = orgMap[email];
-    if (!orgId) {
-      results[email] = { error: "no org id — capture tokens first" };
-      continue;
+  // Fetch live usage for the CURRENT account only (we have its session cookie)
+  const sessionKey = getSessionKey();
+  if (sessionKey && currentEmail && orgMap[currentEmail]) {
+    const orgId = orgMap[currentEmail];
+    if (!usageCache[orgId] || now - usageCache[orgId].fetchedAt > 60000) {
+      const data = await fetchOrgUsage(orgId, sessionKey);
+      if (data && !data.error) {
+        usageCache[orgId] = { data, fetchedAt: now };
+        writeSnapshot(currentEmail, data);
+
+        // Track burn rate
+        const history = readUsageHistory();
+        if (!history[currentEmail]) history[currentEmail] = [];
+        history[currentEmail].push({ utilization: data.five_hour?.utilization ?? 0, timestamp: now });
+        if (history[currentEmail].length > 100) history[currentEmail] = history[currentEmail].slice(-100);
+        writeUsageHistory(history);
+      }
     }
-
-    // Use cache if fresh (60s)
-    if (usageCache[orgId] && now - usageCache[orgId].fetchedAt < 60000) {
-      results[email] = usageCache[orgId].data;
-      continue;
-    }
-
-    const data = await fetchOrgUsage(orgId, sessionKey);
-    if (data && !data.error) {
-      usageCache[orgId] = { data, fetchedAt: now };
-      results[email] = data;
-
-      // Record history for burn rate
-      const history = readUsageHistory();
-      if (!history[email]) history[email] = [];
-      history[email].push({ utilization: data.five_hour?.utilization ?? 0, timestamp: now });
-      // Keep last 100 entries
-      if (history[email].length > 100) history[email] = history[email].slice(-100);
-      writeUsageHistory(history);
-    } else {
-      results[email] = data || { error: "fetch failed" };
+    if (usageCache[orgId]) {
+      results[currentEmail] = { ...usageCache[orgId].data, live: true };
     }
   }
 
-  // Compute pooled utilization (average of available accounts)
-  const available = Object.values(results).filter((r: any) => r.five_hour && !r.error);
-  const pooledFiveHour = available.length > 0
-    ? available.reduce((sum: number, r: any) => sum + r.five_hour.utilization, 0) / available.length
+  // For other accounts, use stored snapshots
+  for (const email of accounts) {
+    if (results[email]) continue;
+    if (snapshots[email] && snapshots[email].five_hour) {
+      const age = now - (snapshots[email].snapshotAt || 0);
+      results[email] = {
+        ...snapshots[email],
+        live: false,
+        staleMinutes: Math.round(age / 60000),
+      };
+    } else if (!orgMap[email]) {
+      results[email] = { error: "not captured yet" };
+    } else {
+      results[email] = { error: "no data — will update on next rotation" };
+    }
+  }
+
+  // Pooled: use all accounts that have data (live or snapshot)
+  const withData = Object.values(results).filter((r: any) => r.five_hour && !r.error);
+  const pooledFiveHour = withData.length > 0
+    ? withData.reduce((sum: number, r: any) => sum + r.five_hour.utilization, 0) / withData.length
     : null;
-  const pooledSevenDay = available.length > 0
-    ? available.reduce((sum: number, r: any) => sum + r.seven_day.utilization, 0) / available.length
+  const pooledSevenDay = withData.length > 0
+    ? withData.reduce((sum: number, r: any) => sum + r.seven_day.utilization, 0) / withData.length
     : null;
 
-  // Estimate time to next swap from burn rate (5-hour utilization)
+  // Swap estimate from burn rate
   let estimatedSwapMinutes: number | null = null;
   if (currentEmail) {
     const history = readUsageHistory();
@@ -484,7 +499,7 @@ app.get("/api/claude-usage", async (_: Request, response: Response) => {
     pooled: {
       fiveHour: pooledFiveHour !== null ? Math.round(pooledFiveHour) : null,
       sevenDay: pooledSevenDay !== null ? Math.round(pooledSevenDay) : null,
-      accountCount: available.length,
+      accountCount: withData.length,
     },
     estimatedSwapMinutes,
   });

@@ -142,9 +142,11 @@ fi
 log "=== Rotating: $CURRENT_EMAIL -> $NEXT_EMAIL ==="
 notify "Rotating to $NEXT_EMAIL..."
 
-# Step 1: Save current tokens
-log "Step 1: Saving current tokens"
+# Step 1: Save current tokens + usage snapshot
+log "Step 1: Saving current tokens and usage"
 node "$SCRIPT_DIR/tokens.js" capture 2>&1 | while read -r line; do log "  $line"; done
+# Snapshot current account's usage before we swap away
+curl -s "http://localhost:3848/api/claude-usage" > /dev/null 2>&1 || true
 
 # Step 2: Map panes to session IDs via TTY -> PID -> session file
 log "Step 2: Mapping pane sessions"
