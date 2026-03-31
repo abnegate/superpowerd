@@ -206,16 +206,79 @@ UNIT
   echo "    Installed systemd user service (superpowerd-monitor)"
 fi
 
+# Dashboard service
+NPX_PATH=$(which npx)
+echo "==> Dashboard service"
+if [[ "$(uname)" == "Darwin" ]]; then
+  DASH_PLIST="$HOME/Library/LaunchAgents/com.superpowerd.dashboard.plist"
+  cat > "$DASH_PLIST" << DASHPLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.superpowerd.dashboard</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$NPX_PATH</string>
+        <string>tsx</string>
+        <string>$PROJECT_DIR/dashboard/server.ts</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>$PROJECT_DIR/dashboard</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$PROJECT_DIR/data/dashboard.log</string>
+    <key>StandardErrorPath</key>
+    <string>$PROJECT_DIR/data/dashboard.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:$(dirname "$NODE_PATH")</string>
+    </dict>
+</dict>
+</plist>
+DASHPLIST
+  launchctl bootout gui/$(id -u) "$DASH_PLIST" 2>/dev/null || true
+  launchctl bootstrap gui/$(id -u) "$DASH_PLIST" 2>/dev/null || launchctl load "$DASH_PLIST" 2>/dev/null || true
+  echo "    Installed launchd service (com.superpowerd.dashboard)"
+else
+  UNIT_DIR="$HOME/.config/systemd/user"
+  mkdir -p "$UNIT_DIR"
+  cat > "$UNIT_DIR/superpowerd-dashboard.service" << DASHUNIT
+[Unit]
+Description=superpowerd dashboard
+After=network.target
+
+[Service]
+ExecStart=$NPX_PATH tsx $PROJECT_DIR/dashboard/server.ts
+WorkingDirectory=$PROJECT_DIR/dashboard
+Restart=always
+RestartSec=5
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:$(dirname "$NODE_PATH")
+
+[Install]
+WantedBy=default.target
+DASHUNIT
+  systemctl --user daemon-reload 2>/dev/null || true
+  systemctl --user enable --now superpowerd-dashboard 2>/dev/null || true
+  echo "    Installed systemd user service (superpowerd-dashboard)"
+fi
+
 echo ""
 echo "=== Setup complete ==="
 echo ""
-echo "The rate limit monitor is running in the background."
+echo "Running services:"
+echo "  Monitor:    watching ~/.claude/debug/ for rate limits"
+echo "  Dashboard:  http://localhost:3848"
 echo ""
 echo "Commands:"
 echo "  sp-rotate             Rotate to next account"
 echo "  sp-rotate --status    Show current account"
 echo "  sp-monitor --status   Check monitor"
-echo "  sp-dashboard          Start web dashboard"
 echo ""
 echo "Shortcuts (in WezTerm):"
 echo "  Opt+Cmd+\`   Toggle WezTerm"
