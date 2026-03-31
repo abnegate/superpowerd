@@ -184,6 +184,7 @@ app.get("/api/usage", (_: Request, response: Response) => {
   let todayTokens = 0;
   let todayTools = 0;
   let totalTokens = 0;
+  let totalCost = 0;
   let totalMessages = 0;
   let totalSessions = 0;
   const dailyActivity: Array<{ date: string; messages: number; tokens: number; tools: number }> = [];
@@ -193,10 +194,25 @@ app.get("/api/usage", (_: Request, response: Response) => {
     totalMessages = stats.totalMessages || 0;
     totalSessions = stats.totalSessions || 0;
 
-    // Model usage totals
+    // Per-million-token pricing (USD)
+    const pricing: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {
+      "claude-opus-4-6":            { input: 15,  output: 75,  cacheRead: 1.5,  cacheWrite: 18.75 },
+      "claude-opus-4-5-20251101":   { input: 15,  output: 75,  cacheRead: 1.5,  cacheWrite: 18.75 },
+      "claude-sonnet-4-6":          { input: 3,   output: 15,  cacheRead: 0.3,  cacheWrite: 3.75 },
+      "claude-sonnet-4-5-20250929": { input: 3,   output: 15,  cacheRead: 0.3,  cacheWrite: 3.75 },
+      "claude-haiku-4-5-20251001":  { input: 0.8, output: 4,   cacheRead: 0.08, cacheWrite: 1 },
+    };
+    const fallbackPricing = { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 };
+
+    // Model usage totals + cost calculation
     if (stats.modelUsage) {
-      for (const model of Object.values(stats.modelUsage) as Array<Record<string, number>>) {
-        totalTokens += (model.inputTokens || 0) + (model.outputTokens || 0);
+      for (const [model, usage] of Object.entries(stats.modelUsage) as Array<[string, Record<string, number>]>) {
+        totalTokens += (usage.inputTokens || 0) + (usage.outputTokens || 0);
+        const rates = pricing[model] || fallbackPricing;
+        totalCost += ((usage.inputTokens || 0) / 1_000_000) * rates.input;
+        totalCost += ((usage.outputTokens || 0) / 1_000_000) * rates.output;
+        totalCost += ((usage.cacheReadInputTokens || 0) / 1_000_000) * rates.cacheRead;
+        totalCost += ((usage.cacheCreationInputTokens || 0) / 1_000_000) * rates.cacheWrite;
       }
     }
 
@@ -279,6 +295,7 @@ app.get("/api/usage", (_: Request, response: Response) => {
       messages: totalMessages,
       tokens: totalTokens,
       sessions: totalSessions,
+      cost: Math.round(totalCost * 100) / 100,
     },
     tokenExpiry,
     dailyActivity,

@@ -250,6 +250,11 @@ button.danger:hover {
   color: var(--text-bright);
 }
 
+.auth-row .value.cost {
+  color: var(--bright-green);
+  font-weight: 700;
+}
+
 .logs {
   background: var(--surface);
   border: 1px solid var(--border);

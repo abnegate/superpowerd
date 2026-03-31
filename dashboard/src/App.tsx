@@ -30,7 +30,7 @@ interface DailyEntry {
 interface Usage {
   activeSessions: number;
   today: { messages: number; tokens: number; tools: number; rateLimits: number };
-  totals: { messages: number; tokens: number; sessions: number };
+  totals: { messages: number; tokens: number; sessions: number; cost: number };
   tokenExpiry: string | null;
   dailyActivity: DailyEntry[];
 }
@@ -293,8 +293,12 @@ export default function App() {
               <div className="auth-row">
                 <span className="key">lifetime</span>
                 <span className="value">
-                  {formatNumber(usage?.totals.sessions ?? 0)} sessions / {formatNumber(usage?.totals.messages ?? 0)} msgs / {formatNumber(usage?.totals.tokens ?? 0)} tok
+                  {formatNumber(usage?.totals.sessions ?? 0)} sessions / {formatNumber(usage?.totals.messages ?? 0)} msgs
                 </span>
+              </div>
+              <div className="auth-row">
+                <span className="key">api value</span>
+                <span className="value cost">${formatNumber(usage?.totals.cost ?? 0)}</span>
               </div>
             </div>
           ) : (
