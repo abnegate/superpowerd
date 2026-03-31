@@ -60,8 +60,8 @@ function writeKeychain(data, account) {
 function getKeychainAccount() {
   try {
     const output = execFileSync(
-      "security", ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-g"],
-      { encoding: "utf8", timeout: 5000 }
+      "security", ["find-generic-password", "-s", KEYCHAIN_SERVICE],
+      { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] }
     );
     const match = output.match(/"acct"<blob>="([^"]+)"/);
     return match ? match[1] : null;

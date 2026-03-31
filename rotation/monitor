@@ -5,7 +5,7 @@
 #   monitor --daemon     # Background
 #   monitor --stop       # Stop
 #   monitor --status     # Check
-set -uo pipefail
+set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -90,43 +90,65 @@ trap cleanup SIGTERM SIGINT
 echo $$ > "$PID_FILE"
 log "Monitor started (cooldown: ${COOLDOWN}s)"
 
-while true; do
-  LATEST=$(ls -t "$DEBUG_DIR"/*.txt 2>/dev/null | head -1)
+# Watch ALL recently modified debug logs (last 60 min), not just one
+TAIL_PIDS=()
 
-  if [[ -z "$LATEST" ]]; then
-    log "No debug logs, waiting..."
-    sleep 10
-    continue
+restart_watchers() {
+  # Kill existing watchers
+  for pid in "${TAIL_PIDS[@]}"; do
+    kill "$pid" 2>/dev/null || true
+  done
+  wait 2>/dev/null || true
+  TAIL_PIDS=()
+
+  # Find debug logs modified in the last 60 minutes
+  ACTIVE_LOGS=$(find "$DEBUG_DIR" -name "*.txt" -mmin -60 2>/dev/null || true)
+
+  if [[ -z "$ACTIVE_LOGS" ]]; then
+    # Fall back to most recent
+    ACTIVE_LOGS=$(ls -t "$DEBUG_DIR"/*.txt 2>/dev/null | head -1)
   fi
 
-  log "Watching: $(basename "$LATEST")"
+  if [[ -z "$ACTIVE_LOGS" ]]; then
+    log "No debug logs found"
+    return
+  fi
 
-  tail -n 0 -f "$LATEST" 2>/dev/null | while read -r line; do
-    if echo "$line" | grep -qiE "$PATTERNS"; then
-      if echo "$line" | grep -q "client_data.*429"; then
-        continue
+  local count=0
+  for logfile in $ACTIVE_LOGS; do
+    tail -n 0 -f "$logfile" 2>/dev/null | while read -r line; do
+      if echo "$line" | grep -qiE "$PATTERNS"; then
+        if echo "$line" | grep -q "client_data.*429"; then
+          continue
+        fi
+        log "Signal [$(basename "$logfile" .txt | cut -c1-8)]: $(echo "$line" | head -c 200)"
+        if should_rotate; then
+          do_rotate
+        else
+          log "In cooldown, skipping"
+        fi
       fi
-      log "Signal: $(echo "$line" | head -c 200)"
-      if should_rotate; then
-        do_rotate
-      else
-        log "In cooldown, skipping"
-      fi
-    fi
-  done &
-  TAIL_PID=$!
-
-  while true; do
-    sleep 30
-    NEW=$(ls -t "$DEBUG_DIR"/*.txt 2>/dev/null | head -1)
-    if [[ "$NEW" != "$LATEST" ]]; then
-      log "New log: $(basename "$NEW")"
-      kill "$TAIL_PID" 2>/dev/null || true
-      wait "$TAIL_PID" 2>/dev/null || true
-      break
-    fi
-    if ! kill -0 "$TAIL_PID" 2>/dev/null; then
-      break
-    fi
+    done &
+    TAIL_PIDS+=($!)
+    count=$((count + 1))
   done
+  log "Watching $count debug log(s)"
+}
+
+restart_watchers
+
+# Refresh watchers every 60 seconds to pick up new debug logs
+while true; do
+  sleep 60
+  # Check if any watcher died
+  ALIVE=0
+  for pid in "${TAIL_PIDS[@]}"; do
+    kill -0 "$pid" 2>/dev/null && ALIVE=$((ALIVE + 1))
+  done
+  # Refresh if watchers died or new logs appeared
+  NEW_COUNT=$(find "$DEBUG_DIR" -name "*.txt" -mmin -60 2>/dev/null | wc -l | tr -d ' ')
+  if [[ "$ALIVE" -lt "${#TAIL_PIDS[@]}" ]] || [[ "$NEW_COUNT" -ne "${#TAIL_PIDS[@]}" ]]; then
+    log "Refreshing watchers (alive=$ALIVE, logs=$NEW_COUNT)"
+    restart_watchers
+  fi
 done

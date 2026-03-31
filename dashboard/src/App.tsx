@@ -1,4 +1,10 @@
-import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import Sidebar from "./components/Sidebar";
+import Overview from "./pages/Overview";
+import UsagePage from "./pages/Usage";
+import HistoryPage from "./pages/History";
+import SessionsPage from "./pages/Sessions";
+import LogsPage from "./pages/Logs";
 
 interface MonitorInfo {
   running: boolean;
@@ -35,130 +41,23 @@ interface Usage {
   dailyActivity: DailyEntry[];
 }
 
-function formatNumber(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + "k";
-  return n.toString();
-}
+const PAGE_MAP: Record<string, string> = {
+  "": "overview",
+  overview: "overview",
+  usage: "usage",
+  history: "history",
+  sessions: "sessions",
+  logs: "logs",
+};
 
-function formatLogLine(line: string): ReactNode {
-  const match = line.match(/^\[([^\]]+)\]\s*(.*)/);
-  if (!match) return <span>{line}</span>;
-  const [, timestamp, rest] = match;
-  let className = "";
-  if (rest.includes("!!!") || rest.includes("Signal")) className = "signal";
-  else if (rest.includes("[rotate]")) className = "rotate";
-  else if (rest.includes("Now using") || rest.includes("===")) className = "success";
-  return (
-    <>
-      <span className="timestamp">{timestamp}</span>{" "}
-      <span className={className}>{rest}</span>
-    </>
-  );
-}
-
-function Sparkline({ data, height = 80 }: { data: number[]; height?: number }) {
-  if (data.length < 2) return <div className="sparkline-empty">no data</div>;
-  const max = Math.max(...data, 1);
-  const width = 200;
-  const step = width / (data.length - 1);
-
-  const points = data.map((v, i) => `${i * step},${height - (v / max) * (height - 6)}`).join(" ");
-  const fillPoints = `0,${height} ${points} ${(data.length - 1) * step},${height}`;
-
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="sparkline" preserveAspectRatio="none">
-      <polygon points={fillPoints} fill="url(#sparkFill)" />
-      <polyline points={points} fill="none" stroke="var(--green)" strokeWidth="1.5" />
-      <defs>
-        <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--green)" stopOpacity="0.15" />
-          <stop offset="100%" stopColor="var(--green)" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-    </svg>
-  );
-}
-
-function UsageBar({ label, percent, reset }: { label: string; percent: number; reset: string | null }) {
-  const minutes = reset ? Math.max(0, Math.floor((new Date(reset).getTime() - Date.now()) / 60000)) : null;
-  const hours = minutes !== null ? Math.floor(minutes / 60) : null;
-  const remaining = hours !== null && hours > 0 ? hours + "h " + (minutes! % 60) + "m" : minutes !== null ? minutes + "m" : "";
-  const color = percent >= 90 ? "var(--red)" : percent >= 70 ? "var(--bright-orange)" : "var(--green)";
-
-  return (
-    <div className="usage-bar-row">
-      <div className="usage-bar-header">
-        <span className="key">{label}</span>
-        <span className="usage-bar-stats">
-          <span style={{ color }}>{percent}%</span>
-          {remaining && <span className="dim"> resets {remaining}</span>}
-        </span>
-      </div>
-      <div className="usage-bar-track">
-        <div className="usage-bar-fill" style={{ width: percent + "%", background: color }} />
-      </div>
-    </div>
-  );
-}
-
-type ChartRange = 1 | 7 | 14 | 30;
-
-function ActivityChart({ activity }: { activity: DailyEntry[] }) {
-  const [range, setRange] = useState<ChartRange>(14);
-  const data = activity.slice(-range);
-  const ranges: ChartRange[] = [1, 7, 14, 30];
-
-  const latestMessages = data.length > 0 ? data[data.length - 1].messages : 0;
-  const latestTokens = data.length > 0 ? data[data.length - 1].tokens : 0;
-  const totalMessages = data.reduce((sum, d) => sum + d.messages, 0);
-  const totalTokens = data.reduce((sum, d) => sum + d.tokens, 0);
-
-  return (
-    <>
-      <div className="chart-header">
-        <h2>// activity</h2>
-        <div className="chart-tabs">
-          {ranges.map((r) => (
-            <button
-              key={r}
-              className={`chart-tab ${range === r ? "active" : ""}`}
-              onClick={() => setRange(r)}
-            >
-              {r}d
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="chart-grid">
-        <div className="chart-block">
-          <div className="chart-block-header">
-            <span className="chart-block-label">messages</span>
-            <span className="chart-block-value">{formatNumber(totalMessages)} total</span>
-          </div>
-          <Sparkline data={data.map((d) => d.messages)} />
-          <div className="chart-block-footer">
-            <span>latest: {formatNumber(latestMessages)}</span>
-            <span>avg: {formatNumber(data.length > 0 ? Math.round(totalMessages / data.length) : 0)}/day</span>
-          </div>
-        </div>
-        <div className="chart-block">
-          <div className="chart-block-header">
-            <span className="chart-block-label">tokens</span>
-            <span className="chart-block-value">{formatNumber(totalTokens)} total</span>
-          </div>
-          <Sparkline data={data.map((d) => d.tokens)} />
-          <div className="chart-block-footer">
-            <span>latest: {formatNumber(latestTokens)}</span>
-            <span>avg: {formatNumber(data.length > 0 ? Math.round(totalTokens / data.length) : 0)}/day</span>
-          </div>
-        </div>
-      </div>
-    </>
-  );
+function getPageFromHash(): string {
+  const hash = window.location.hash.replace("#/", "").replace("#", "");
+  return PAGE_MAP[hash] ?? "overview";
 }
 
 export default function App() {
+  const [page, setPage] = useState(getPageFromHash);
+  const [collapsed, setCollapsed] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [auth, setAuth] = useState<AuthInfo | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
@@ -167,7 +66,17 @@ export default function App() {
   const [history, setHistory] = useState<any>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [rotating, setRotating] = useState(false);
-  const logsEnd = useRef<HTMLDivElement>(null);
+
+  const navigate = useCallback((target: string) => {
+    setPage(target);
+    window.location.hash = target === "overview" ? "/" : "/" + target;
+  }, []);
+
+  useEffect(() => {
+    const handler = () => setPage(getPageFromHash());
+    window.addEventListener("hashchange", handler);
+    return () => window.removeEventListener("hashchange", handler);
+  }, []);
 
   const fetchAll = useCallback(async () => {
     try {
@@ -182,19 +91,19 @@ export default function App() {
       setAuth(await a.json());
       setUsage(await u.json());
       setSessions(await sess.json());
-      const histData = await hist.json();
-      if (!histData.error) setHistory(histData);
+      const historyData = await hist.json();
+      if (!historyData.error) setHistory(historyData);
     } catch {}
     try {
-      const cu = await fetch("/api/claude-usage");
-      const data = await cu.json();
+      const response = await fetch("/api/claude-usage");
+      const data = await response.json();
       if (!data.error) setClaudeUsage(data);
     } catch {}
   }, []);
 
   useEffect(() => {
     fetchAll();
-    const interval = setInterval(fetchAll, 5000);
+    const interval = setInterval(fetchAll, 15000);
     return () => clearInterval(interval);
   }, [fetchAll]);
 
@@ -202,14 +111,10 @@ export default function App() {
     const source = new EventSource("/api/logs");
     source.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      setLogs((prev) => [...prev.slice(-500), data.line]);
+      setLogs((previous) => [...previous.slice(-500), data.line]);
     };
     return () => source.close();
   }, []);
-
-  useEffect(() => {
-    logsEnd.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
 
   async function handleRotate(email?: string) {
     setRotating(true);
@@ -232,261 +137,48 @@ export default function App() {
 
   if (!status) {
     return (
-      <div className="app">
-        <div className="empty">connecting...</div>
+      <div className="app-shell">
+        <div className="loading">
+          <div className="loading-text">
+            super<span>powerd</span>
+          </div>
+          <div className="loading-sub">connecting...</div>
+        </div>
       </div>
     );
   }
 
-  const tokenMinutes = usage?.tokenExpiry
-    ? Math.max(0, Math.floor((new Date(usage.tokenExpiry).getTime() - Date.now()) / 60000))
-    : null;
-
   return (
-    <div className="app">
-      <header>
-        <h1>super<span>powerd</span></h1>
-        <div className={`badge ${status.monitor.running ? "running" : "stopped"}`}>
-          <div className="dot" />
-          {status.monitor.running ? "monitoring" : "idle"}
-        </div>
-      </header>
-
-      <div className="grid">
-        <div className="card full">
-          <div className="metrics">
-            <div className="metric">
-              <div className="metric-value">{usage?.activeSessions ?? 0}</div>
-              <div className="metric-label">sessions</div>
-            </div>
-            <div className="metric">
-              <div className="metric-value">{formatNumber(usage?.today.messages ?? 0)}</div>
-              <div className="metric-label">messages</div>
-            </div>
-            <div className="metric">
-              <div className="metric-value">{formatNumber(usage?.today.tokens ?? 0)}</div>
-              <div className="metric-label">tokens</div>
-            </div>
-            <div className="metric">
-              <div className="metric-value">{formatNumber(usage?.today.tools ?? 0)}</div>
-              <div className="metric-label">tool calls</div>
-            </div>
-            <div className="metric">
-              <div className={`metric-value ${(usage?.today.rateLimits ?? 0) > 0 ? "warn" : ""}`}>
-                {usage?.today.rateLimits ?? 0}
-              </div>
-              <div className="metric-label">429s</div>
-            </div>
-            {tokenMinutes !== null && (
-              <div className="metric">
-                <div className={`metric-value ${tokenMinutes < 30 ? "warn" : ""}`}>
-                  {tokenMinutes}<span className="metric-unit">m</span>
-                </div>
-                <div className="metric-label">token ttl</div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="card">
-          <h2>// accounts</h2>
-          <div className="accounts">
-            {status.accounts.map((email, i) => (
-              <div key={email} className={`account ${i === status.current ? "active" : ""}`}>
-                <span className="email">{email}</span>
-                {i === status.current ? (
-                  <span className="label">active</span>
-                ) : (
-                  <button onClick={() => handleRotate(email)} disabled={rotating}>switch</button>
-                )}
-              </div>
-            ))}
-          </div>
-          <div className="controls">
-            <button className="primary" onClick={() => handleRotate()} disabled={rotating}>
-              {rotating ? "rotating..." : "rotate next"}
-            </button>
-          </div>
-        </div>
-
-        <div className="card">
-          <h2>// auth</h2>
-          {auth?.authenticated ? (
-            <div className="auth-info">
-              <div className="auth-row">
-                <span className="key">email</span>
-                <span className="value">{auth.email}</span>
-              </div>
-              <div className="auth-row">
-                <span className="key">plan</span>
-                <span className="value">{auth.subscriptionType}</span>
-              </div>
-              <div className="auth-row">
-                <span className="key">org</span>
-                <span className="value">{auth.orgName}</span>
-              </div>
-              <div className="auth-row section-break">
-                <span className="key">lifetime</span>
-                <span className="value dim" />
-              </div>
-              <div className="auth-row">
-                <span className="key">sessions</span>
-                <span className="value">{formatNumber(usage?.totals.sessions ?? 0)}</span>
-              </div>
-              <div className="auth-row">
-                <span className="key">messages</span>
-                <span className="value">{formatNumber(usage?.totals.messages ?? 0)}</span>
-              </div>
-              <div className="auth-row">
-                <span className="key">tokens</span>
-                <span className="value">{formatNumber(usage?.totals.tokens ?? 0)}</span>
-              </div>
-              <div className="auth-row">
-                <span className="key">api value</span>
-                <span className="value cost">
-                  ${(usage?.totals.cost ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                </span>
-              </div>
-            </div>
-          ) : (
-            <div className="empty">not authenticated</div>
-          )}
-          <div className="controls">
-            {status.monitor.running ? (
-              <button className="danger" onClick={() => handleMonitor("stop")}>stop monitor</button>
-            ) : (
-              <button onClick={() => handleMonitor("start")}>start monitor</button>
-            )}
-          </div>
-        </div>
-
-        {claudeUsage?.accounts && (
-          <div className="card full">
-            <h2>// usage</h2>
-            {claudeUsage.pooled?.fiveHour !== null && (
-              <div className="usage-pool">
-                <div className="usage-pool-header">
-                  <span>pool ({claudeUsage.pooled.accountCount} accounts)</span>
-                  {claudeUsage.estimatedSwapMinutes !== null && (
-                    <span className="dim">swap in ~{claudeUsage.estimatedSwapMinutes}m</span>
-                  )}
-                </div>
-                <UsageBar label="5-hour" percent={claudeUsage.pooled.fiveHour} reset={null} />
-                <UsageBar label="7-day" percent={claudeUsage.pooled.sevenDay} reset={null} />
-              </div>
-            )}
-            <div className="usage-accounts">
-              {Object.entries(claudeUsage.accounts).map(([email, data]: [string, any]) => (
-                data?.five_hour && !data.error ? (
-                  <div key={email} className="usage-account">
-                    <div className="usage-account-header">
-                      <span>{email.split("@")[0]}</span>
-                      <span className="dim">
-                        {data.live ? "live" : data.staleMinutes !== undefined ? data.staleMinutes + "m ago" : ""}
-                      </span>
-                    </div>
-                    <UsageBar label="5-hour" percent={data.five_hour.utilization} reset={data.live ? data.five_hour.resets_at : null} />
-                    <UsageBar label="7-day" percent={data.seven_day.utilization} reset={data.live ? data.seven_day.resets_at : null} />
-                  </div>
-                ) : data?.error ? (
-                  <div key={email} className="usage-account">
-                    <div className="usage-account-header">
-                      <span>{email.split("@")[0]}</span>
-                      <span className="dim">{data.error}</span>
-                    </div>
-                  </div>
-                ) : null
-              ))}
-            </div>
-          </div>
+    <div className="app-shell">
+      <Sidebar
+        page={page}
+        onNavigate={navigate}
+        monitorRunning={status.monitor.running}
+        collapsed={collapsed}
+        onToggle={() => setCollapsed((c) => !c)}
+      />
+      <main className={`main-content ${collapsed ? "expanded" : ""}`}>
+        {page === "overview" && (
+          <Overview
+            status={status}
+            auth={auth}
+            usage={usage}
+            claudeUsage={claudeUsage}
+            sessions={sessions}
+            onRotate={handleRotate}
+            onMonitor={handleMonitor}
+            rotating={rotating}
+          />
         )}
-
-        {sessions?.sessions?.length > 0 && (
-          <div className="card full">
-            <h2>// sessions ({sessions.sessions.length} active, ${sessions.totalCost} api value)</h2>
-            <table className="sessions-table">
-              <thead>
-                <tr>
-                  <th>repo</th>
-                  <th>messages</th>
-                  <th>output</th>
-                  <th>cache</th>
-                  <th>cost</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sessions.sessions.map((s: any) => (
-                  <tr key={s.session}>
-                    <td className="session-repo">{s.repo}</td>
-                    <td>{formatNumber(s.messages)}</td>
-                    <td>{formatNumber(s.output)}</td>
-                    <td>{formatNumber(s.cacheRead)}</td>
-                    <td className="session-cost">${s.cost.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        {page === "usage" && (
+          <UsagePage claudeUsage={claudeUsage} logs={logs} />
         )}
-
-        {history && (
-          <div className="card full">
-            <h2>// all time ({history.totalSessions} sessions, ${formatNumber(history.totalCost)} api value)</h2>
-            <div className="history-grid">
-              <div className="history-repos">
-                <table className="sessions-table">
-                  <thead>
-                    <tr><th>repo</th><th>sessions</th><th>messages</th><th>cost</th></tr>
-                  </thead>
-                  <tbody>
-                    {history.repos?.slice(0, 12).map((r: any) => (
-                      <tr key={r.repo}>
-                        <td className="session-repo">{r.repo}</td>
-                        <td>{r.sessions}</td>
-                        <td>{formatNumber(r.messages)}</td>
-                        <td className="session-cost">${formatNumber(r.cost)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {history.dailyCosts?.length > 1 && (
-                <div className="history-chart">
-                  <div className="chart-block-header">
-                    <span className="chart-block-label">daily cost</span>
-                    <span className="chart-block-value">
-                      ${history.dailyCosts.length > 0
-                        ? (history.dailyCosts.reduce((s: number, d: any) => s + d.cost, 0) / history.dailyCosts.length).toFixed(0)
-                        : 0}/day avg
-                    </span>
-                  </div>
-                  <Sparkline data={history.dailyCosts.map((d: any) => d.cost)} />
-                </div>
-              )}
-            </div>
-          </div>
+        {page === "history" && <HistoryPage history={history} />}
+        {page === "sessions" && (
+          <SessionsPage sessions={sessions} history={history} />
         )}
-
-        {usage && usage.dailyActivity.length > 1 && (
-          <div className="card full">
-            <ActivityChart activity={usage.dailyActivity} />
-          </div>
-        )}
-
-        <div className="card full">
-          <h2>// log stream</h2>
-          <div className="logs">
-            {logs.length === 0 ? (
-              <div className="empty">waiting for log entries...</div>
-            ) : (
-              logs.map((line, i) => (
-                <div key={i} className="log-line">{formatLogLine(line)}</div>
-              ))
-            )}
-            <div ref={logsEnd} />
-          </div>
-        </div>
-      </div>
+        {page === "logs" && <LogsPage logs={logs} />}
+      </main>
     </div>
   );
 }
