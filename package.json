@@ -1,0 +1,23 @@
+{
+  "name": "superpowerd",
+  "version": "1.0.0",
+  "description": "Multi-account Claude Code workspace manager with WezTerm integration",
+  "scripts": {
+    "setup": "bash setup.sh",
+    "browser:setup": "node rotation/browser-auth.js setup",
+    "rotate": "./rotation/rotate",
+    "rotate:status": "./rotation/rotate --status",
+    "monitor": "./rotation/monitor",
+    "monitor:start": "./rotation/monitor --daemon",
+    "monitor:stop": "./rotation/monitor --stop",
+    "monitor:status": "./rotation/monitor --status",
+    "dashboard": "cd dashboard && npx tsx server.ts",
+    "dashboard:dev": "cd dashboard && npx vite",
+    "dashboard:build": "cd dashboard && npx vite build",
+    "postinstall": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.52.0"
+  },
+  "license": "MIT"
+}

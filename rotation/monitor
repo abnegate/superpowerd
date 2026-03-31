@@ -1,0 +1,132 @@
+#!/bin/bash
+# Monitor Claude Code debug logs for rate limits and auto-rotate accounts.
+# Usage:
+#   monitor              # Foreground
+#   monitor --daemon     # Background
+#   monitor --stop       # Stop
+#   monitor --status     # Check
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+DATA_DIR="$PROJECT_DIR/data"
+PID_FILE="$DATA_DIR/monitor.pid"
+LOG_FILE="$DATA_DIR/monitor.log"
+COOLDOWN=300
+DEBUG_DIR="$HOME/.claude/debug"
+
+mkdir -p "$DATA_DIR"
+
+log() {
+  local msg="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $1"
+  echo "$msg"
+  echo "$msg" >> "$LOG_FILE"
+}
+
+case "${1:-}" in
+  --daemon)
+    if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+      echo "Already running (PID $(cat "$PID_FILE"))"
+      exit 1
+    fi
+    nohup "$0" >> "$LOG_FILE" 2>&1 &
+    echo "$!" > "$PID_FILE"
+    echo "Monitor started (PID $!)"
+    echo "Log: $LOG_FILE"
+    exit 0
+    ;;
+  --stop)
+    if [[ -f "$PID_FILE" ]]; then
+      PID=$(cat "$PID_FILE")
+      if kill -0 "$PID" 2>/dev/null; then
+        kill "$PID"
+        rm -f "$PID_FILE"
+        echo "Stopped (PID $PID)"
+      else
+        rm -f "$PID_FILE"
+        echo "Not running (stale PID cleaned)"
+      fi
+    else
+      echo "Not running"
+    fi
+    exit 0
+    ;;
+  --status)
+    if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+      echo "Running (PID $(cat "$PID_FILE"))"
+      tail -5 "$LOG_FILE" 2>/dev/null
+    else
+      echo "Not running"
+    fi
+    exit 0
+    ;;
+esac
+
+PATTERNS="status=429|Rate limited|rate_limit|usage.*limit|limit.*reached|limit.*exceeded|too many requests|overloaded|status=529|capacity"
+
+LAST_ROTATION=0
+
+should_rotate() {
+  local now
+  now=$(date +%s)
+  [[ $((now - LAST_ROTATION)) -ge $COOLDOWN ]]
+}
+
+do_rotate() {
+  LAST_ROTATION=$(date +%s)
+  log "!!! Rate limit detected — rotating"
+  "$SCRIPT_DIR/rotate" 2>&1 | while read -r line; do log "  [rotate] $line"; done
+  log "Cooldown: ${COOLDOWN}s"
+}
+
+cleanup() {
+  log "Shutting down"
+  rm -f "$PID_FILE"
+  jobs -p | xargs -r kill 2>/dev/null || true
+  exit 0
+}
+trap cleanup SIGTERM SIGINT
+
+echo $$ > "$PID_FILE"
+log "Monitor started (cooldown: ${COOLDOWN}s)"
+
+while true; do
+  LATEST=$(ls -t "$DEBUG_DIR"/*.txt 2>/dev/null | head -1)
+
+  if [[ -z "$LATEST" ]]; then
+    log "No debug logs, waiting..."
+    sleep 10
+    continue
+  fi
+
+  log "Watching: $(basename "$LATEST")"
+
+  tail -n 0 -f "$LATEST" 2>/dev/null | while read -r line; do
+    if echo "$line" | grep -qiE "$PATTERNS"; then
+      if echo "$line" | grep -q "client_data.*429"; then
+        continue
+      fi
+      log "Signal: $(echo "$line" | head -c 200)"
+      if should_rotate; then
+        do_rotate
+      else
+        log "In cooldown, skipping"
+      fi
+    fi
+  done &
+  TAIL_PID=$!
+
+  while true; do
+    sleep 30
+    NEW=$(ls -t "$DEBUG_DIR"/*.txt 2>/dev/null | head -1)
+    if [[ "$NEW" != "$LATEST" ]]; then
+      log "New log: $(basename "$NEW")"
+      kill "$TAIL_PID" 2>/dev/null || true
+      wait "$TAIL_PID" 2>/dev/null || true
+      break
+    fi
+    if ! kill -0 "$TAIL_PID" 2>/dev/null; then
+      break
+    fi
+  done
+done

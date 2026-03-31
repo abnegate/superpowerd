@@ -1,0 +1,18 @@
+# Keyboard shortcuts (Opt+Cmd+<key>).
+#
+# Pane focus shortcuts — one per repo (matches directory name from repos.conf):
+#   directory=key
+#
+# The "local" pane is always bound to Opt+Cmd+L.
+#
+# Built-in shortcuts (always active):
+#   Opt+Cmd+`         Toggle WezTerm visibility
+#   Opt+Cmd+P         Open current repo's PR in browser
+#   Opt+Cmd+N         Push branch and create PR
+#   Opt+Cmd+R         Restart Claude in current pane
+#   Opt+Cmd+Down      Add a row of local panes
+appwrite=a
+cloud=c
+edge=e
+database=d
+console=o

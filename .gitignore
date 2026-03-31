@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/
+accounts.conf
+repos.conf
+shortcuts.conf
+*.log
+.DS_Store

@@ -1,0 +1,272 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #0a1f18;
+  --surface: #0e2a1f;
+  --border: #1a3d2e;
+  --text: #e8f5e9;
+  --muted: #6b8f7b;
+  --green: #41a83e;
+  --bright-green: #73da70;
+  --orange: #fd6209;
+  --bright-orange: #ff943b;
+  --blue: #5fafff;
+  --red: #ff4444;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  min-height: 100vh;
+}
+
+.app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 32px;
+}
+
+header h1 {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+header h1 span {
+  color: var(--bright-green);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.badge.running {
+  background: rgba(65, 168, 62, 0.15);
+  color: var(--bright-green);
+}
+
+.badge.stopped {
+  background: rgba(253, 98, 9, 0.15);
+  color: var(--bright-orange);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.dot.pulse {
+  animation: pulse 2s infinite;
+}
+
+.running .dot {
+  background: var(--bright-green);
+}
+
+.stopped .dot {
+  background: var(--bright-orange);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.card.full {
+  grid-column: 1 / -1;
+}
+
+.card h2 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+
+.accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid transparent;
+  transition: all 0.15s;
+}
+
+.account.active {
+  border-color: var(--green);
+  background: rgba(65, 168, 62, 0.08);
+}
+
+.account .email {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 14px;
+}
+
+.account .label {
+  font-size: 12px;
+  color: var(--green);
+  font-weight: 600;
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+button:hover {
+  background: var(--border);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+}
+
+button.primary:hover {
+  background: var(--bright-green);
+}
+
+button.danger {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+button.danger:hover {
+  background: rgba(255, 68, 68, 0.1);
+}
+
+.logs {
+  background: #050f0b;
+  border-radius: 8px;
+  padding: 16px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.logs::-webkit-scrollbar {
+  width: 6px;
+}
+
+.logs::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.log-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-line .timestamp {
+  color: var(--muted);
+}
+
+.log-line .rotate {
+  color: var(--bright-orange);
+}
+
+.log-line .signal {
+  color: var(--red);
+}
+
+.log-line .success {
+  color: var(--bright-green);
+}
+
+.auth-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+}
+
+.auth-row .key {
+  color: var(--muted);
+}
+
+.auth-row .value {
+  font-family: "SF Mono", "Fira Code", monospace;
+  color: var(--blue);
+}
+
+.empty {
+  color: var(--muted);
+  font-style: italic;
+  padding: 24px;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

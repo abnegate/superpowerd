@@ -1,0 +1,8 @@
+# Repos to open in the dev terminal.
+# Format: directory=org/repo
+# A "local" shell pane is always added at the end.
+appwrite=appwrite/appwrite
+cloud=appwrite-labs/cloud
+edge=appwrite-labs/edge
+database=utopia-php/database
+console=appwrite/console

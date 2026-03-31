@@ -1,0 +1,139 @@
+#!/bin/bash
+# Rotate to the next Claude account.
+# Usage:
+#   rotate              # Next account
+#   rotate <email>      # Specific account
+#   rotate --status     # Show current
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+DATA_DIR="$PROJECT_DIR/data"
+STATE_FILE="$DATA_DIR/state.json"
+ACCOUNTS_FILE="$PROJECT_DIR/accounts.conf"
+LOG_FILE="$DATA_DIR/rotate.log"
+
+mkdir -p "$DATA_DIR"
+
+log() {
+  local msg="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $1"
+  echo "$msg"
+  echo "$msg" >> "$LOG_FILE"
+}
+
+notify() {
+  osascript -e "display notification \"$1\" with title \"Superpowerd\"" 2>/dev/null \
+    || notify-send "Superpowerd" "$1" 2>/dev/null \
+    || true
+}
+
+load_accounts() {
+  local accounts=()
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    accounts+=("$line")
+  done < "$ACCOUNTS_FILE"
+  echo "${accounts[@]}"
+}
+
+if [[ ! -f "$STATE_FILE" ]]; then
+  echo '{"current": 0}' > "$STATE_FILE"
+fi
+
+if [[ ! -f "$ACCOUNTS_FILE" ]]; then
+  echo "Error: $ACCOUNTS_FILE not found. Copy accounts.conf.example to accounts.conf"
+  exit 1
+fi
+ACCOUNTS=($(load_accounts))
+TOTAL=${#ACCOUNTS[@]}
+
+get_current() {
+  node -e "console.log(require('$STATE_FILE').current)"
+}
+
+update_state() {
+  node -e "
+    var fs = require('fs');
+    var state = JSON.parse(fs.readFileSync('$STATE_FILE', 'utf8'));
+    state.current = $1;
+    state.email = '$2';
+    state.timestamp = new Date().toISOString();
+    fs.writeFileSync('$STATE_FILE', JSON.stringify(state, null, 2) + '\n');
+  "
+}
+
+CURRENT=$(get_current)
+CURRENT_EMAIL=${ACCOUNTS[$CURRENT]}
+
+if [[ "${1:-}" == "--status" ]]; then
+  echo "Current: $CURRENT_EMAIL (index $CURRENT of $TOTAL)"
+  echo "Accounts:"
+  for i in "${!ACCOUNTS[@]}"; do
+    marker=""
+    [[ "$i" == "$CURRENT" ]] && marker=" <-- active"
+    echo "  [$i] ${ACCOUNTS[$i]}$marker"
+  done
+  echo ""
+  claude auth status 2>/dev/null || echo "(CLI not authenticated)"
+  exit 0
+fi
+
+# Determine next account
+if [[ -n "${1:-}" ]]; then
+  NEXT_INDEX=-1
+  for i in "${!ACCOUNTS[@]}"; do
+    [[ "${ACCOUNTS[$i]}" == "$1" ]] && NEXT_INDEX=$i
+  done
+  if [[ "$NEXT_INDEX" == "-1" ]]; then
+    echo "Account not found: $1"
+    echo "Available: ${ACCOUNTS[*]}"
+    exit 1
+  fi
+else
+  NEXT_INDEX=$(( (CURRENT + 1) % TOTAL ))
+fi
+
+NEXT_EMAIL=${ACCOUNTS[$NEXT_INDEX]}
+
+if [[ "$CURRENT" == "$NEXT_INDEX" ]]; then
+  log "Already on $CURRENT_EMAIL"
+  exit 0
+fi
+
+log "=== Rotating: $CURRENT_EMAIL -> $NEXT_EMAIL ==="
+notify "Rotating to $NEXT_EMAIL..."
+
+log "Step 1: CLI logout"
+claude auth logout 2>/dev/null || true
+
+log "Step 2: Browser auth"
+node "$SCRIPT_DIR/browser-auth.js" login "$NEXT_EMAIL" 2>&1 | while read -r line; do log "  $line"; done
+
+log "Step 3: State update"
+update_state "$NEXT_INDEX" "$NEXT_EMAIL"
+
+log "Step 4: Re-auth terminals"
+if command -v wezterm &>/dev/null; then
+  PANE_IDS=$(wezterm cli list 2>/dev/null | tail -n +2 | awk '{print $3}' || true)
+  CURRENT_PANE=${WEZTERM_PANE:-}
+
+  for pane_id in $PANE_IDS; do
+    [[ "$pane_id" == "$CURRENT_PANE" ]] && continue
+    TEXT=$(wezterm cli get-text --pane-id "$pane_id" 2>/dev/null | tail -5 || true)
+    if echo "$TEXT" | grep -qiE '(claude|[>❯✻✽]|\/login|\$ claude)'; then
+      log "  /login -> pane $pane_id"
+      wezterm cli send-text --pane-id "$pane_id" --no-paste $'\x1b' 2>/dev/null || true
+      sleep 0.3
+      wezterm cli send-text --pane-id "$pane_id" "/login" 2>/dev/null || true
+      sleep 0.2
+      wezterm cli send-text --pane-id "$pane_id" --no-paste $'\r' 2>/dev/null || true
+      sleep 1
+    fi
+  done
+fi
+
+log "=== Now using: $NEXT_EMAIL ==="
+notify "Now using $NEXT_EMAIL"
+echo ""
+echo "Switched to: $NEXT_EMAIL"
+echo "Confirm /login in any browser windows that opened."

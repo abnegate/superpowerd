@@ -1,0 +1,5 @@
+# Claude accounts for rotation (one per line).
+# When a rate limit is hit, the next account is used.
+jake@appwrite.io
+jakeb994@gmail.com
+jcbarnby@gmail.com
