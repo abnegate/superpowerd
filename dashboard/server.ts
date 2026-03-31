@@ -620,6 +620,56 @@ app.get("/api/sessions", (_: Request, response: Response) => {
   });
 });
 
+// Historical session data from the index
+const sessionIndexPath = join(dataDirectory, "session-index.json");
+
+app.get("/api/history", (_: Request, response: Response) => {
+  if (!existsSync(sessionIndexPath)) {
+    response.json({ error: "run: node rotation/index-sessions.js" });
+    return;
+  }
+
+  const index = JSON.parse(readFileSync(sessionIndexPath, "utf8"));
+
+  // Group by repo
+  const repos: Record<string, { sessions: number; messages: number; cost: number; output: number; cacheRead: number }> = {};
+  let totalCost = 0;
+
+  for (const session of Object.values(index.sessions) as any[]) {
+    const repo = session.repo || "unknown";
+    if (!repos[repo]) repos[repo] = { sessions: 0, messages: 0, cost: 0, output: 0, cacheRead: 0 };
+    repos[repo].sessions += 1;
+    repos[repo].messages += session.messages || 0;
+    repos[repo].cost += session.cost || 0;
+    repos[repo].output += session.output || 0;
+    repos[repo].cacheRead += session.cacheRead || 0;
+    totalCost += session.cost || 0;
+  }
+
+  const sorted = Object.entries(repos)
+    .map(([repo, stats]) => ({ repo, ...stats, cost: Math.round(stats.cost * 100) / 100 }))
+    .sort((a, b) => b.cost - a.cost);
+
+  // Daily cost breakdown (group sessions by start date)
+  const daily: Record<string, number> = {};
+  for (const session of Object.values(index.sessions) as any[]) {
+    if (!session.startedAt) continue;
+    const date = new Date(session.startedAt).toISOString().slice(0, 10);
+    daily[date] = (daily[date] || 0) + (session.cost || 0);
+  }
+  const dailyCosts = Object.entries(daily)
+    .map(([date, cost]) => ({ date, cost: Math.round(cost * 100) / 100 }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  response.json({
+    totalSessions: index.totalSessions,
+    totalCost: Math.round(totalCost * 100) / 100,
+    indexedAt: index.indexedAt,
+    repos: sorted,
+    dailyCosts,
+  });
+});
+
 app.get("/api/auth", (_: Request, response: Response) => {
   execFile("claude", ["auth", "status"], { timeout: 5000 }, (error, stdout) => {
     if (error) {
@@ -641,6 +691,14 @@ if (existsSync(distDirectory)) {
     response.sendFile(join(distDirectory, "index.html"));
   });
 }
+
+// Re-index sessions every 5 minutes
+const indexScript = join(projectDirectory, "rotation", "index-sessions.js");
+function reindex() {
+  execFile("node", [indexScript], { timeout: 120000 }, () => {});
+}
+reindex();
+setInterval(reindex, 300000);
 
 const port = process.env.PORT || 3848;
 app.listen(port, () => console.log("Superpowerd dashboard: http://localhost:" + port));

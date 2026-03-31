@@ -164,22 +164,26 @@ export default function App() {
   const [usage, setUsage] = useState<Usage | null>(null);
   const [claudeUsage, setClaudeUsage] = useState<any>(null);
   const [sessions, setSessions] = useState<any>(null);
+  const [history, setHistory] = useState<any>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [rotating, setRotating] = useState(false);
   const logsEnd = useRef<HTMLDivElement>(null);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [s, a, u, sess] = await Promise.all([
+      const [s, a, u, sess, hist] = await Promise.all([
         fetch("/api/status"),
         fetch("/api/auth"),
         fetch("/api/usage"),
         fetch("/api/sessions"),
+        fetch("/api/history"),
       ]);
       setStatus(await s.json());
       setAuth(await a.json());
       setUsage(await u.json());
       setSessions(await sess.json());
+      const histData = await hist.json();
+      if (!histData.error) setHistory(histData);
     } catch {}
     try {
       const cu = await fetch("/api/claude-usage");
@@ -422,6 +426,44 @@ export default function App() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {history && (
+          <div className="card full">
+            <h2>// all time ({history.totalSessions} sessions, ${formatNumber(history.totalCost)} api value)</h2>
+            <div className="history-grid">
+              <div className="history-repos">
+                <table className="sessions-table">
+                  <thead>
+                    <tr><th>repo</th><th>sessions</th><th>messages</th><th>cost</th></tr>
+                  </thead>
+                  <tbody>
+                    {history.repos?.slice(0, 12).map((r: any) => (
+                      <tr key={r.repo}>
+                        <td className="session-repo">{r.repo}</td>
+                        <td>{r.sessions}</td>
+                        <td>{formatNumber(r.messages)}</td>
+                        <td className="session-cost">${formatNumber(r.cost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {history.dailyCosts?.length > 1 && (
+                <div className="history-chart">
+                  <div className="chart-block-header">
+                    <span className="chart-block-label">daily cost</span>
+                    <span className="chart-block-value">
+                      ${history.dailyCosts.length > 0
+                        ? (history.dailyCosts.reduce((s: number, d: any) => s + d.cost, 0) / history.dailyCosts.length).toFixed(0)
+                        : 0}/day avg
+                    </span>
+                  </div>
+                  <Sparkline data={history.dailyCosts.map((d: any) => d.cost)} />
+                </div>
+              )}
+            </div>
           </div>
         )}
 
