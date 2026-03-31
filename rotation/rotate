@@ -1,10 +1,10 @@
 #!/bin/bash
 # Rotate to the next Claude account.
 #
-# Seamless flow:
-#   1. Swap OAuth tokens in the keychain (instant)
-#   2. Restart Claude in each WezTerm pane with --continue (preserves context)
-#   3. Each new process reads the new token from keychain
+# Seamless flow — no restart, no browser, no interruption:
+#   1. Write the next account's OAuth token to data/active-token
+#   2. Claude Code's apiKeyHelper reads this file on the next API call
+#   3. Every running agent picks up the new account automatically
 #
 # Usage:
 #   rotate              # Next account
@@ -17,6 +17,8 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DATA_DIR="$PROJECT_DIR/data"
 STATE_FILE="$DATA_DIR/state.json"
 ACCOUNTS_FILE="$PROJECT_DIR/accounts.conf"
+TOKENS_FILE="$DATA_DIR/tokens.json"
+ACTIVE_TOKEN="$DATA_DIR/active-token"
 LOG_FILE="$DATA_DIR/rotate.log"
 
 mkdir -p "$DATA_DIR"
@@ -108,50 +110,53 @@ if [[ "$CURRENT" == "$NEXT_INDEX" ]]; then
 fi
 
 log "=== Rotating: $CURRENT_EMAIL -> $NEXT_EMAIL ==="
-notify "Rotating to $NEXT_EMAIL..."
 
-# Step 1: Capture current account's tokens before we lose them
+# Step 1: Capture current account's tokens (in case they refreshed)
 log "Step 1: Saving current tokens"
 node "$SCRIPT_DIR/tokens.js" capture 2>&1 | while read -r line; do log "  $line"; done
 
-# Step 2: Swap keychain to the next account (instant)
-log "Step 2: Swapping keychain tokens"
-if ! node "$SCRIPT_DIR/tokens.js" swap "$NEXT_EMAIL" 2>&1 | while read -r line; do log "  $line"; done; then
-  log "No stored tokens for $NEXT_EMAIL — falling back to browser auth"
+# Step 2: Get the next account's token
+NEXT_TOKEN=$(node -e "
+  var store = {};
+  try { store = JSON.parse(require('fs').readFileSync('$TOKENS_FILE', 'utf8')); } catch {}
+  var token = store['$NEXT_EMAIL'];
+  if (token && token.accessToken) {
+    process.stdout.write(token.accessToken);
+  }
+" 2>/dev/null || true)
+
+if [[ -z "$NEXT_TOKEN" ]]; then
+  log "No stored token for $NEXT_EMAIL — authenticating via browser"
+  notify "Authenticating $NEXT_EMAIL..."
+
+  # Full browser auth flow (first time only)
   claude auth logout 2>/dev/null || true
   node "$SCRIPT_DIR/browser-auth.js" login "$NEXT_EMAIL" 2>&1 | while read -r line; do log "  $line"; done
-  # Capture the new tokens for next time
   node "$SCRIPT_DIR/tokens.js" capture 2>&1 | while read -r line; do log "  $line"; done
+
+  NEXT_TOKEN=$(node -e "
+    var store = JSON.parse(require('fs').readFileSync('$TOKENS_FILE', 'utf8'));
+    process.stdout.write(store['$NEXT_EMAIL'].accessToken);
+  " 2>/dev/null || true)
 fi
 
-# Step 3: Update state
+if [[ -z "$NEXT_TOKEN" ]]; then
+  log "ERROR: Could not obtain token for $NEXT_EMAIL"
+  exit 1
+fi
+
+# Step 3: Write the token — this is the actual rotation
+# Claude's apiKeyHelper reads this file on the next API call
+log "Step 2: Swapping active token"
+printf '%s' "$NEXT_TOKEN" > "$ACTIVE_TOKEN"
+chmod 600 "$ACTIVE_TOKEN"
+
+# Step 4: Update state
 log "Step 3: State update"
 update_state "$NEXT_INDEX" "$NEXT_EMAIL"
-
-# Step 4: Restart Claude in all WezTerm panes with --continue
-log "Step 4: Restarting agents"
-if command -v wezterm &>/dev/null; then
-  PANE_IDS=$(wezterm cli list 2>/dev/null | tail -n +2 | awk '{print $3}' || true)
-  CURRENT_PANE=${WEZTERM_PANE:-}
-
-  for pane_id in $PANE_IDS; do
-    [[ "$pane_id" == "$CURRENT_PANE" ]] && continue
-    TEXT=$(wezterm cli get-text --pane-id "$pane_id" 2>/dev/null | tail -5 || true)
-    if echo "$TEXT" | grep -qiE '(claude|[>❯✻✽]|\/login|\$ claude)'; then
-      log "  Restarting pane $pane_id"
-      # Send Ctrl+C to kill the current Claude process
-      wezterm cli send-text --pane-id "$pane_id" --no-paste $'\x03' 2>/dev/null || true
-      sleep 0.5
-      # Restart Claude with --continue to resume the conversation
-      wezterm cli send-text --pane-id "$pane_id" "claude --dangerously-skip-permissions --continue" 2>/dev/null || true
-      wezterm cli send-text --pane-id "$pane_id" --no-paste $'\r' 2>/dev/null || true
-      sleep 0.3
-    fi
-  done
-fi
 
 log "=== Now using: $NEXT_EMAIL ==="
 notify "Now using $NEXT_EMAIL"
 echo ""
 echo "Switched to: $NEXT_EMAIL"
-echo "All agents restarted with --continue (context preserved)."
+echo "All running agents will use the new account on their next API call."

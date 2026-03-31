@@ -115,12 +115,21 @@ BLOCK
 fi
 
 # Make scripts executable
-chmod +x "$PROJECT_DIR/rotation/rotate" "$PROJECT_DIR/rotation/monitor" "$PROJECT_DIR/rotation/browser-auth.js"
+chmod +x "$PROJECT_DIR/rotation/rotate" "$PROJECT_DIR/rotation/monitor" "$PROJECT_DIR/rotation/browser-auth.js" "$PROJECT_DIR/rotation/token-helper" "$PROJECT_DIR/rotation/tokens.js"
 
 # Initialize data directory
 mkdir -p "$PROJECT_DIR/data"
 if [[ ! -f "$PROJECT_DIR/data/state.json" ]]; then
   echo '{"current": 0}' > "$PROJECT_DIR/data/state.json"
+fi
+
+# Seed initial active token from current keychain session
+if [[ ! -f "$PROJECT_DIR/data/active-token" ]]; then
+  echo "==> Capturing initial token"
+  "$PROJECT_DIR/rotation/token-helper" > "$PROJECT_DIR/data/active-token" 2>/dev/null && \
+    chmod 600 "$PROJECT_DIR/data/active-token" && \
+    echo "    Saved active token" || \
+    echo "    (no token available yet — run: node rotation/tokens.js capture-all)"
 fi
 
 # Install root deps (Playwright)
