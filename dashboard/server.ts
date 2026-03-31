@@ -450,13 +450,32 @@ app.get("/api/claude-usage", async (_: Request, response: Response) => {
     }
   }
 
-  // For other accounts, use stored snapshots
+  // For other accounts, use stored snapshots — but zero out utilization
+  // if the reset window has passed since the snapshot was taken
   for (const email of accounts) {
     if (results[email]) continue;
     if (snapshots[email] && snapshots[email].five_hour) {
-      const age = now - (snapshots[email].snapshotAt || 0);
+      const snap = { ...snapshots[email] };
+      const age = now - (snap.snapshotAt || 0);
+
+      // If the 5-hour reset time has passed, utilization is 0
+      if (snap.five_hour?.resets_at) {
+        const resetTime = new Date(snap.five_hour.resets_at).getTime();
+        if (now > resetTime) {
+          snap.five_hour = { ...snap.five_hour, utilization: 0, resets_at: null };
+        }
+      }
+
+      // Same for 7-day
+      if (snap.seven_day?.resets_at) {
+        const resetTime = new Date(snap.seven_day.resets_at).getTime();
+        if (now > resetTime) {
+          snap.seven_day = { ...snap.seven_day, utilization: 0, resets_at: null };
+        }
+      }
+
       results[email] = {
-        ...snapshots[email],
+        ...snap,
         live: false,
         staleMinutes: Math.round(age / 60000),
       };
