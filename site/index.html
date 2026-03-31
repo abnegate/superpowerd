@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>superpowerd</title>
-<meta name="description" content="Multi-account Claude Code workspace manager. Automatic rate limit detection, account rotation, WezTerm pane grid.">
+<meta name="description" content="Run 6+ Claude Code agents in parallel without hitting rate limits. Automatic account rotation, WezTerm workspace, real-time dashboard.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Space+Grotesk:wght@400;500;700&display=swap');
@@ -29,10 +29,7 @@
 
 ::selection{background:var(--green);color:var(--black)}
 
-html{
-  font-size:16px;
-  scroll-behavior:smooth;
-}
+html{font-size:16px;scroll-behavior:smooth}
 
 body{
   background:var(--black);
@@ -46,410 +43,189 @@ body{
 a{color:var(--green);text-decoration:none}
 a:hover{color:var(--green-bright)}
 
-.wrap{
-  max-width:900px;
-  margin:0 auto;
-  padding:0 24px;
-}
-
-/* ── scanline overlay ──────────────────────────── */
+.wrap{max-width:900px;margin:0 auto;padding:0 24px}
 
 body::after{
-  content:'';
-  position:fixed;
-  top:0;left:0;right:0;bottom:0;
-  background:repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 2px,
-    rgba(0,0,0,0.03) 2px,
-    rgba(0,0,0,0.03) 4px
-  );
-  pointer-events:none;
-  z-index:9999;
+  content:'';position:fixed;top:0;left:0;right:0;bottom:0;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.03) 2px,rgba(0,0,0,0.03) 4px);
+  pointer-events:none;z-index:9999;
 }
-
-/* ── top bar ───────────────────────────────────── */
 
 .topbar{
-  border-bottom:1px solid var(--border);
-  padding:12px 0;
-  font-size:12px;
-  color:var(--text-dim);
-  position:sticky;
-  top:0;
-  background:var(--black);
-  z-index:100;
+  border-bottom:1px solid var(--border);padding:12px 0;font-size:12px;
+  color:var(--text-dim);position:sticky;top:0;background:var(--black);z-index:100;
 }
-.topbar .wrap{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-}
+.topbar .wrap{display:flex;justify-content:space-between;align-items:center}
 .topbar a{color:var(--text-dim);font-size:12px}
 .topbar a:hover{color:var(--text)}
 .topbar-left{display:flex;gap:24px;align-items:center}
-.topbar-dot{
-  width:6px;height:6px;
-  background:var(--green);
-  display:inline-block;
-  /* static dot */
-}
+.topbar-dot{width:6px;height:6px;background:var(--green);display:inline-block}
 
-/* ── hero ──────────────────────────────────────── */
-
-.hero{
-  padding:120px 0 80px;
-  border-bottom:1px solid var(--border);
-}
+.hero{padding:120px 0 80px;border-bottom:1px solid var(--border)}
 
 .hero-pre{
-  font-size:13px;
-  color:var(--text-dim);
-  margin-bottom:16px;
-  letter-spacing:2px;
-  text-transform:uppercase;
+  font-size:13px;color:var(--text-dim);margin-bottom:16px;
+  letter-spacing:2px;text-transform:uppercase;
 }
 
 .hero h1{
-  font-family:var(--sans);
-  font-size:clamp(48px, 8vw, 80px);
-  font-weight:800;
-  color:var(--text-bright);
-  line-height:1;
-  letter-spacing:-3px;
-  margin-bottom:20px;
+  font-family:var(--sans);font-size:clamp(48px, 8vw, 80px);font-weight:800;
+  color:var(--text-bright);line-height:1;letter-spacing:-3px;margin-bottom:20px;
 }
-
-.hero h1 span{
-  color:var(--green);
-}
+.hero h1 span{color:var(--green)}
 
 .hero-sub{
-  font-size:16px;
-  color:var(--text-dim);
-  max-width:520px;
-  margin-bottom:48px;
-  line-height:1.7;
+  font-size:17px;color:var(--text);max-width:580px;margin-bottom:16px;line-height:1.7;
+}
+
+.hero-detail{
+  font-size:14px;color:var(--text-dim);max-width:580px;margin-bottom:48px;line-height:1.8;
+}
+
+.hero-detail em{
+  color:var(--green);font-style:normal;font-weight:500;
 }
 
 .install-block{
-  background:var(--surface);
-  border:1px solid var(--border);
-  padding:20px 24px;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:16px;
-  position:relative;
+  background:var(--surface);border:1px solid var(--border);
+  padding:20px 24px;display:flex;align-items:center;
+  justify-content:space-between;gap:16px;
 }
-
-.install-block::before{
-  content:'$';
-  color:var(--green);
-  font-weight:700;
-  flex-shrink:0;
-}
-
-.install-cmd{
-  flex:1;
-  font-size:14px;
-  color:var(--green-bright);
-  overflow-x:auto;
-  white-space:nowrap;
-}
-
+.install-block::before{content:'$';color:var(--green);font-weight:700;flex-shrink:0}
+.install-cmd{flex:1;font-size:14px;color:var(--green-bright);overflow-x:auto;white-space:nowrap}
 .install-copy{
-  background:none;
-  border:1px solid var(--border-bright);
-  color:var(--text-dim);
-  padding:6px 14px;
-  font-family:var(--mono);
-  font-size:11px;
-  cursor:pointer;
-  text-transform:uppercase;
-  letter-spacing:1px;
-  flex-shrink:0;
-  transition:all 0.15s;
+  background:none;border:1px solid var(--border-bright);color:var(--text-dim);
+  padding:6px 14px;font-family:var(--mono);font-size:11px;cursor:pointer;
+  text-transform:uppercase;letter-spacing:1px;flex-shrink:0;transition:all 0.15s;
 }
-.install-copy:hover{
-  border-color:var(--green);
-  color:var(--green);
-}
-.install-copy.copied{
-  border-color:var(--green);
-  color:var(--green);
-}
+.install-copy:hover{border-color:var(--green);color:var(--green)}
+.install-copy.copied{border-color:var(--green);color:var(--green)}
 
-/* ── section base ──────────────────────────────── */
-
-section{
-  padding:80px 0;
-  border-bottom:1px solid var(--border);
-}
+section{padding:80px 0;border-bottom:1px solid var(--border)}
 
 .section-label{
-  font-size:11px;
-  color:var(--green);
-  text-transform:uppercase;
-  letter-spacing:3px;
-  margin-bottom:40px;
-  display:flex;
-  align-items:center;
-  gap:12px;
+  font-size:11px;color:var(--green);text-transform:uppercase;
+  letter-spacing:3px;margin-bottom:40px;display:flex;align-items:center;gap:12px;
+}
+.section-label::after{content:'';flex:1;height:1px;background:var(--border)}
+
+/* pitch */
+
+.pitch{
+  display:grid;grid-template-columns:1fr 1fr;gap:48px;
+  margin-bottom:64px;
+}
+.pitch-block{}
+.pitch-number{
+  font-family:var(--sans);font-size:48px;font-weight:800;
+  color:var(--green);line-height:1;margin-bottom:8px;
+}
+.pitch-label{
+  font-size:14px;color:var(--text-bright);font-weight:700;
+  text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;
+}
+.pitch-desc{font-size:13px;color:var(--text-dim);line-height:1.8}
+
+.pitch-divider{
+  grid-column:1/-1;height:1px;background:var(--border);
 }
 
-.section-label::after{
-  content:'';
-  flex:1;
-  height:1px;
-  background:var(--border);
-}
+/* features */
 
-/* ── features ──────────────────────────────────── */
-
-.features{
-  display:grid;
-  gap:0;
-}
-
+.features{display:grid;gap:0}
 .feature{
-  padding:32px 0;
-  border-bottom:1px solid var(--border);
-  display:grid;
-  grid-template-columns:200px 1fr;
-  gap:32px;
-  align-items:start;
+  padding:32px 0;border-bottom:1px solid var(--border);
+  display:grid;grid-template-columns:200px 1fr;gap:32px;align-items:start;
 }
-
 .feature:last-child{border-bottom:none}
-
 .feature-name{
-  font-size:13px;
-  font-weight:700;
-  color:var(--text-bright);
-  text-transform:uppercase;
-  letter-spacing:1px;
-  padding-top:2px;
+  font-size:13px;font-weight:700;color:var(--text-bright);
+  text-transform:uppercase;letter-spacing:1px;padding-top:2px;
 }
+.feature-desc{font-size:14px;color:var(--text-dim);line-height:1.8}
+.feature-desc strong{color:var(--text);font-weight:500}
 
-.feature-desc{
-  font-size:14px;
-  color:var(--text-dim);
-  line-height:1.8;
-}
+/* flow */
 
-.feature-desc strong{
-  color:var(--text);
-  font-weight:500;
-}
-
-/* ── how it works ──────────────────────────────── */
-
-.flow{
-  position:relative;
-  padding-left:32px;
-}
-
+.flow{position:relative;padding-left:32px}
 .flow::before{
-  content:'';
-  position:absolute;
-  left:7px;
-  top:8px;
-  bottom:8px;
-  width:1px;
-  background:var(--border-bright);
+  content:'';position:absolute;left:7px;top:8px;bottom:8px;
+  width:1px;background:var(--border-bright);
 }
-
-.flow-step{
-  position:relative;
-  padding:0 0 40px 0;
-}
-
+.flow-step{position:relative;padding:0 0 40px 0}
 .flow-step:last-child{padding-bottom:0}
-
 .flow-step::before{
-  content:'';
-  position:absolute;
-  left:-29px;
-  top:8px;
-  width:9px;
-  height:9px;
-  border:2px solid var(--green-dim);
-  background:var(--black);
+  content:'';position:absolute;left:-29px;top:8px;
+  width:9px;height:9px;border:2px solid var(--green-dim);background:var(--black);
 }
+.flow-step.active::before{background:var(--green);border-color:var(--green)}
+.flow-step-title{font-size:14px;font-weight:700;color:var(--text-bright);margin-bottom:6px}
+.flow-step-desc{font-size:13px;color:var(--text-dim);line-height:1.7}
 
-.flow-step.active::before{
-  background:var(--green);
-  border-color:var(--green);
-}
+/* config */
 
-.flow-step-title{
-  font-size:14px;
-  font-weight:700;
-  color:var(--text-bright);
-  margin-bottom:6px;
-}
-
-.flow-step-desc{
-  font-size:13px;
-  color:var(--text-dim);
-  line-height:1.7;
-}
-
-/* ── config examples ───────────────────────────── */
-
-.configs{
-  display:grid;
-  grid-template-columns:1fr 1fr 1fr;
-  gap:1px;
-  background:var(--border);
-}
-
-.config-block{
-  background:var(--black);
-  padding:24px;
-}
-
+.configs{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:var(--border)}
+.config-block{background:var(--black);padding:24px}
 .config-block-title{
-  font-size:11px;
-  color:var(--green);
-  text-transform:uppercase;
-  letter-spacing:2px;
-  margin-bottom:16px;
-  display:flex;
-  align-items:center;
-  gap:8px;
+  font-size:11px;color:var(--green);text-transform:uppercase;
+  letter-spacing:2px;margin-bottom:16px;display:flex;align-items:center;gap:8px;
 }
-
-.config-block-title::before{
-  content:'//';
-  color:var(--text-dim);
-}
-
-.config-block pre{
-  font-size:12px;
-  line-height:1.8;
-  color:var(--text-dim);
-  overflow-x:auto;
-}
-
+.config-block-title::before{content:'//';color:var(--text-dim)}
+.config-block pre{font-size:12px;line-height:1.8;color:var(--text-dim);overflow-x:auto}
 .config-block pre .comment{color:#333}
 .config-block pre .value{color:var(--green)}
 .config-block pre .key{color:var(--text)}
 
-/* ── shortcuts table ───────────────────────────── */
+/* shortcuts */
 
-.shortcuts-table{
-  width:100%;
-  border-collapse:collapse;
-  font-size:13px;
-}
-
+.shortcuts-table{width:100%;border-collapse:collapse;font-size:13px}
 .shortcuts-table th{
-  text-align:left;
-  padding:12px 0;
-  color:var(--text-dim);
-  font-weight:400;
-  text-transform:uppercase;
-  letter-spacing:2px;
-  font-size:10px;
+  text-align:left;padding:12px 0;color:var(--text-dim);font-weight:400;
+  text-transform:uppercase;letter-spacing:2px;font-size:10px;
   border-bottom:1px solid var(--border-bright);
 }
-
-.shortcuts-table td{
-  padding:10px 0;
-  border-bottom:1px solid var(--border);
-}
-
-.shortcuts-table td:first-child{
-  width:240px;
-}
-
+.shortcuts-table td{padding:10px 0;border-bottom:1px solid var(--border)}
+.shortcuts-table td:first-child{width:240px}
 .kbd{
-  display:inline-block;
-  background:var(--surface);
-  border:1px solid var(--border-bright);
-  padding:2px 8px;
-  font-size:12px;
-  color:var(--green);
-  font-family:var(--mono);
+  display:inline-block;background:var(--surface);border:1px solid var(--border-bright);
+  padding:2px 8px;font-size:12px;color:var(--green);font-family:var(--mono);
 }
+.shortcuts-table td:last-child{color:var(--text-dim)}
 
-.shortcuts-table td:last-child{
-  color:var(--text-dim);
-}
-
-/* ── ascii art ─────────────────────────────────── */
+/* ascii */
 
 .ascii{
-  font-size:10px;
-  line-height:1.3;
-  color:var(--green-dim);
-  white-space:pre;
-  overflow:hidden;
-  padding:60px 0 0;
-  text-align:center;
-  opacity:0.6;
+  font-size:10px;line-height:1.3;color:var(--green-dim);
+  white-space:pre;overflow:hidden;padding:60px 0 0;text-align:center;opacity:0.6;
 }
 
-/* ── footer ────────────────────────────────────── */
-
-footer{
-  padding:40px 0;
-  font-size:12px;
-  color:var(--text-dim);
-}
-
-footer .wrap{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-}
-
+footer{padding:40px 0;font-size:12px;color:var(--text-dim)}
+footer .wrap{display:flex;justify-content:space-between;align-items:center}
 footer a{color:var(--text-dim)}
 footer a:hover{color:var(--green)}
 
-/* ── responsive ────────────────────────────────── */
-
 @media(max-width:768px){
   .hero{padding:80px 0 60px}
+  .pitch{grid-template-columns:1fr;gap:32px}
   .feature{grid-template-columns:1fr;gap:8px}
   .feature-name{font-size:12px}
   .configs{grid-template-columns:1fr}
   .topbar-left span:nth-child(n+3){display:none}
 }
 
-/* ── entrance animations ───────────────────────── */
-
-.fade-in{
-  opacity:0;
-  transform:translateY(12px);
-  transition:opacity 0.6s ease,transform 0.6s ease;
-}
-.fade-in.visible{
-  opacity:1;
-  transform:translateY(0);
-}
-
-/* ── cursor blink on hero ──────────────────────── */
+.fade-in{opacity:0;transform:translateY(12px);transition:opacity 0.6s ease,transform 0.6s ease}
+.fade-in.visible{opacity:1;transform:translateY(0)}
 
 .cursor{
-  display:inline-block;
-  width:10px;
-  height:2px;
-  background:var(--green);
-  margin-left:4px;
-  vertical-align:middle;
+  display:inline-block;width:10px;height:2px;background:var(--green);
+  margin-left:4px;vertical-align:middle;
   animation:cursorblink 2.5s ease-in-out infinite;
 }
-
 @keyframes cursorblink{0%,100%{opacity:1}50%{opacity:0.15}}
 </style>
 </head>
 <body>
 
-<!-- top bar -->
 <div class="topbar">
   <div class="wrap">
     <div class="topbar-left">
@@ -461,15 +237,19 @@ footer a:hover{color:var(--green)}
   </div>
 </div>
 
-<!-- hero -->
 <div class="hero">
   <div class="wrap">
     <div class="hero-pre">claude code toolkit</div>
     <h1>super<span>powerd</span></h1>
     <p class="hero-sub">
-      Multi-account Claude Code workspace manager. Rate limit detection,
-      automatic account rotation, WezTerm pane grid, real-time dashboard.
-      Never wait for limits again.<span class="cursor"></span>
+      Run 6+ Claude Code agents in parallel across repos.
+      Never stop for rate limits.<span class="cursor"></span>
+    </p>
+    <p class="hero-detail">
+      Pool your Claude Max accounts. When one hits a limit, superpowerd
+      rotates to the next &mdash; <em>automatically</em>. Full OAuth flow,
+      browser cookie import, every terminal re-authenticated. Your team
+      of agents keeps shipping while the account cools down.
     </p>
     <div class="install-block">
       <code class="install-cmd">curl -fsSL https://superpowerd.jakebarnby.com/install | bash</code>
@@ -478,60 +258,118 @@ footer a:hover{color:var(--green)}
   </div>
 </div>
 
-<!-- features -->
 <section class="fade-in">
   <div class="wrap">
-    <div class="section-label">What it does</div>
+    <div class="section-label">Why</div>
+
+    <div class="pitch">
+      <div class="pitch-block">
+        <div class="pitch-number">6+</div>
+        <div class="pitch-label">Parallel agents</div>
+        <div class="pitch-desc">
+          Each repo gets its own WezTerm pane running Claude Code.
+          Work across your entire codebase simultaneously &mdash;
+          backend, frontend, infra, SDKs, all at once.
+        </div>
+      </div>
+      <div class="pitch-block">
+        <div class="pitch-number">0s</div>
+        <div class="pitch-label">Downtime on limits</div>
+        <div class="pitch-desc">
+          Rate limit hits trigger automatic rotation to the next
+          account. Browser automation handles the OAuth flow.
+          Your agents never see the "please wait" screen.
+        </div>
+      </div>
+      <div class="pitch-divider"></div>
+      <div class="pitch-block">
+        <div class="pitch-number">3</div>
+        <div class="pitch-label">Accounts, one pool</div>
+        <div class="pitch-desc">
+          Configure as many Claude Max accounts as you have.
+          Round-robin rotation with 5-minute cooldown.
+          Each account's limit resets independently.
+        </div>
+      </div>
+      <div class="pitch-block">
+        <div class="pitch-number">1</div>
+        <div class="pitch-label">Command to install</div>
+        <div class="pitch-desc">
+          Clones the repo, installs WezTerm + Playwright, configures
+          pane grid, starts the rate limit monitor as a system service,
+          and imports your browser cookies. One curl pipe.
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section class="fade-in">
+  <div class="wrap">
+    <div class="section-label">How it works</div>
     <div class="features">
 
       <div class="feature">
-        <div class="feature-name">Account<br>rotation</div>
+        <div class="feature-name">Workspace</div>
         <div class="feature-desc">
-          <strong>Monitors Claude's debug logs for 429s, rate limit messages, and overload signals.</strong>
-          When detected, rotates to the next account automatically. Handles the full OAuth flow &mdash;
-          signs out of claude.ai, switches Google account, re-authenticates the CLI, and sends
-          <code>/login</code> to every terminal. 5-minute cooldown between rotations.
+          <strong>WezTerm opens a 2-column grid with one pane per repo.</strong>
+          Each pane launches Claude Code. Pane titles update live with
+          <code>repo &middot; branch * &middot; PR #123</code>. Layout scales
+          from 2 to 10+ panes with tuned split ratios. One keyboard shortcut
+          per pane.
         </div>
       </div>
 
       <div class="feature">
-        <div class="feature-name">Cookie<br>import</div>
+        <div class="feature-name">Detection</div>
         <div class="feature-desc">
-          <strong>Zero-setup authentication via browser cookie import.</strong>
-          Reads session cookies from Firefox (any platform) or Chrome (decrypts via macOS Keychain
-          with PBKDF2 + AES-128-CBC). Your existing Google sessions flow straight into Playwright.
-          No manual login. No browser:setup command unless you have neither browser.
+          <strong>A background daemon tails Claude's debug logs.</strong>
+          Watches for HTTP 429, 529, "rate limited", "overloaded", "usage limit".
+          Filters out transient startup bursts. When a real limit hits,
+          rotation triggers within seconds.
         </div>
       </div>
 
       <div class="feature">
-        <div class="feature-name">WezTerm<br>grid</div>
+        <div class="feature-name">Rotation</div>
         <div class="feature-desc">
-          <strong>Dynamic 2-column pane layout from <code>repos.conf</code>.</strong>
-          Each repo gets a pane running Claude Code with a background title updater showing
-          <code>repo &middot; branch * &middot; PR #123</code>. Empirically-tuned split ratios
-          for 2&ndash;5 rows. Configurable shortcuts via <code>shortcuts.conf</code>. skhd global
-          hotkeys auto-generated on startup.
+          <strong>Full automated OAuth flow via Playwright.</strong>
+          Signs out of claude.ai, selects the next Google account,
+          completes consent. Intercepts the <code>claude auth login</code> URL
+          via a <code>BROWSER</code> env trap and finishes the callback in the
+          same browser session. Then sends <code>/login</code> to every
+          WezTerm pane.
+        </div>
+      </div>
+
+      <div class="feature">
+        <div class="feature-name">Cookies</div>
+        <div class="feature-desc">
+          <strong>Zero-setup auth &mdash; imports cookies from your real browser.</strong>
+          Firefox: reads <code>cookies.sqlite</code> directly.
+          Chrome on macOS: decrypts via Keychain (PBKDF2 + AES-128-CBC, prompts once).
+          Chrome on Linux: reads unencrypted. No manual login unless you have
+          neither browser.
         </div>
       </div>
 
       <div class="feature">
         <div class="feature-name">Dashboard</div>
         <div class="feature-desc">
-          <strong>React + TypeScript web UI at <code>localhost:3848</code>.</strong>
-          Shows active account, CLI auth status, monitor state. Live log stream via Server-Sent Events.
-          One-click rotation, per-account switching, monitor start/stop. Dark theme matching the
-          WezTerm color scheme.
+          <strong>React/TypeScript web UI at <code>localhost:3848</code>.</strong>
+          Active account indicator, CLI auth status, monitor state.
+          One-click rotation buttons, live log stream via SSE.
+          Start/stop the monitor from the browser.
         </div>
       </div>
 
       <div class="feature">
         <div class="feature-name">Recovery</div>
         <div class="feature-desc">
-          <strong>Claude Code slash command <code>/auto-updater</code> for OAuth repair.</strong>
-          Five recovery procedures: CLI auth reset, browser session cleanup, full credential nuke,
-          selector updates for UI changes, and WezTerm terminal re-auth. Symlinked into
-          <code>~/.claude/commands/</code> by setup.
+          <strong>Claude Code slash command <code>/auto-updater</code>.</strong>
+          Five recovery procedures for when auth breaks: CLI reset, browser
+          session cleanup, credential nuke, selector updates, terminal re-auth.
         </div>
       </div>
 
@@ -539,40 +377,38 @@ footer a:hover{color:var(--green)}
   </div>
 </section>
 
-<!-- how it works -->
 <section class="fade-in">
   <div class="wrap">
     <div class="section-label">Rotation flow</div>
     <div class="flow">
       <div class="flow-step active">
         <div class="flow-step-title">Rate limit detected</div>
-        <div class="flow-step-desc">Monitor daemon tails <code>~/.claude/debug/*.txt</code> and catches HTTP 429, 529, "overloaded", "usage limit", etc.</div>
+        <div class="flow-step-desc">Monitor daemon catches 429/529 in <code>~/.claude/debug/*.txt</code>.</div>
       </div>
       <div class="flow-step">
         <div class="flow-step-title">CLI logout</div>
-        <div class="flow-step-desc"><code>claude auth logout</code> clears the current CLI credentials.</div>
+        <div class="flow-step-desc"><code>claude auth logout</code> clears current credentials.</div>
       </div>
       <div class="flow-step">
-        <div class="flow-step-title">Browser automation</div>
-        <div class="flow-step-desc">Playwright launches with imported cookies, signs out of claude.ai, signs in with the next Google account via OAuth chooser.</div>
+        <div class="flow-step-title">Browser switch</div>
+        <div class="flow-step-desc">Playwright signs out of claude.ai and into the next Google account.</div>
       </div>
       <div class="flow-step">
-        <div class="flow-step-title">URL interception</div>
-        <div class="flow-step-desc"><code>claude auth login</code> runs with a <code>BROWSER</code> env trap. The OAuth URL is captured to a temp file and opened in the same Playwright session.</div>
+        <div class="flow-step-title">OAuth interception</div>
+        <div class="flow-step-desc"><code>claude auth login</code> URL captured via <code>BROWSER</code> env trap, completed in Playwright.</div>
       </div>
       <div class="flow-step">
         <div class="flow-step-title">Callback</div>
-        <div class="flow-step-desc">OAuth completes, redirects to <code>localhost</code>. CLI receives the token. State file updated.</div>
+        <div class="flow-step-desc">OAuth redirects to <code>localhost</code>. CLI receives the token.</div>
       </div>
       <div class="flow-step active">
-        <div class="flow-step-title">Terminal re-auth</div>
-        <div class="flow-step-desc"><code>/login</code> sent to all WezTerm panes running Claude via <code>wezterm cli send-text</code>. Desktop notification confirms the switch.</div>
+        <div class="flow-step-title">All terminals re-authenticated</div>
+        <div class="flow-step-desc"><code>/login</code> sent to every WezTerm pane. Desktop notification. All agents resume.</div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- config -->
 <section class="fade-in">
   <div class="wrap">
     <div class="section-label">Configuration</div>
@@ -587,22 +423,21 @@ footer a:hover{color:var(--green)}
       <div class="config-block">
         <div class="config-block-title">repos.conf</div>
         <pre><span class="comment"># directory=org/repo</span>
-<span class="key">myapp</span>=<span class="value">myorg/myapp</span>
-<span class="key">backend</span>=<span class="value">myorg/backend</span>
-<span class="key">frontend</span>=<span class="value">myorg/frontend</span></pre>
+<span class="key">api</span>=<span class="value">myorg/api</span>
+<span class="key">web</span>=<span class="value">myorg/web</span>
+<span class="key">infra</span>=<span class="value">myorg/infra</span></pre>
       </div>
       <div class="config-block">
         <div class="config-block-title">shortcuts.conf</div>
         <pre><span class="comment"># directory=key (Opt+Cmd)</span>
-<span class="key">myapp</span>=<span class="value">m</span>
-<span class="key">backend</span>=<span class="value">b</span>
-<span class="key">frontend</span>=<span class="value">f</span></pre>
+<span class="key">api</span>=<span class="value">a</span>
+<span class="key">web</span>=<span class="value">w</span>
+<span class="key">infra</span>=<span class="value">i</span></pre>
       </div>
     </div>
   </div>
 </section>
 
-<!-- shortcuts -->
 <section class="fade-in">
   <div class="wrap">
     <div class="section-label">WezTerm shortcuts</div>
@@ -623,7 +458,6 @@ footer a:hover{color:var(--green)}
   </div>
 </section>
 
-<!-- ascii footer art -->
 <div class="ascii" aria-hidden="true">
  _____ _   _ _____ ___________  _____ _____  _    _ ___________  ______
 /  ___| | | |  _  |  ___| ___ \|  _  |  _  || |  | |  ___| ___ \|  _  \
@@ -633,7 +467,6 @@ footer a:hover{color:var(--green)}
 \____/ \___/\_|   \____/\_| \_|\_|    \___/  \/  \/\____/\_| \_||___/
 </div>
 
-<!-- footer -->
 <footer>
   <div class="wrap">
     <span>MIT &middot; macOS &amp; Linux</span>
@@ -648,8 +481,6 @@ function copyInstall(btn){
   btn.classList.add('copied');
   setTimeout(()=>{btn.textContent='copy';btn.classList.remove('copied')},2000);
 }
-
-// intersection observer for fade-in
 const observer=new IntersectionObserver((entries)=>{
   entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');observer.unobserve(e.target)}});
 },{threshold:0.1});
