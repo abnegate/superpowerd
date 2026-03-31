@@ -123,14 +123,11 @@ if [[ ! -f "$PROJECT_DIR/data/state.json" ]]; then
   echo '{"current": 0}' > "$PROJECT_DIR/data/state.json"
 fi
 
-# Seed initial active token from current keychain session
-if [[ ! -f "$PROJECT_DIR/data/active-token" ]]; then
-  echo "==> Capturing initial token"
-  "$PROJECT_DIR/rotation/token-helper" > "$PROJECT_DIR/data/active-token" 2>/dev/null && \
-    chmod 600 "$PROJECT_DIR/data/active-token" && \
-    echo "    Saved active token" || \
-    echo "    (no token available yet — run: node rotation/tokens.js capture-all)"
-fi
+# Capture current account's tokens
+echo "==> Capturing tokens"
+node "$PROJECT_DIR/rotation/tokens.js" capture 2>/dev/null && \
+  echo "    Saved current account tokens" || \
+  echo "    (no session — run: node rotation/tokens.js capture-all after authenticating)"
 
 # Install root deps (Playwright)
 echo "==> Playwright"

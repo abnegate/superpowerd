@@ -5,6 +5,7 @@
   "scripts": {
     "setup": "bash setup.sh",
     "browser:setup": "node rotation/browser-auth.js setup",
+    "tokens:capture": "node rotation/tokens.js capture-all",
     "rotate": "./rotation/rotate",
     "rotate:status": "./rotation/rotate --status",
     "monitor": "./rotation/monitor",

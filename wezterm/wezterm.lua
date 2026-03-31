@@ -210,7 +210,7 @@ wezterm.on("gui-startup", function()
           .. "[ -n \"$PR\" ] && T=\"$T · $PR\"; "
           .. "printf '\\033]1;%s\\a' \"$T\"; "
           .. "done & } 2>/dev/null\n")
-        pane:send_text("CLAUDE_CODE_API_KEY_HELPER_TTL_MS=0 claude --dangerously-skip-permissions --settings='{\"apiKeyHelper\":\"" .. superpowerd .. "/rotation/token-helper\"}'\n")
+        pane:send_text("claude --dangerously-skip-permissions\n")
       end
     end
   end
@@ -293,7 +293,7 @@ table.insert(config.keys, {
   action = wezterm.action_callback(function(_, pane)
     pane:send_text("\x03")
     wezterm.time.call_after(0.5, function()
-      pane:send_text("CLAUDE_CODE_API_KEY_HELPER_TTL_MS=0 claude --dangerously-skip-permissions --settings='{\"apiKeyHelper\":\"" .. superpowerd .. "/rotation/token-helper\"}'\n")
+      pane:send_text("claude --dangerously-skip-permissions\n")
     end)
   end),
 })
