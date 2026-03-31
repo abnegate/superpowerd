@@ -1,0 +1,51 @@
+#!/bin/bash
+set -euo pipefail
+
+# superpowerd installer
+# curl -fsSL https://superpowerd.jakebarnby.com/install | bash
+
+REPO="abnegate/superpowerd"
+INSTALL_DIR="${SUPERPOWERD_HOME:-$HOME/Local/superpowerd}"
+WORKSPACE="${SUPERPOWERD_WORKSPACE:-$HOME/Local}"
+
+echo ""
+echo "  superpowerd installer"
+echo ""
+
+# Prerequisites
+for cmd in git node npm; do
+  if ! command -v "$cmd" &>/dev/null; then
+    echo "Error: $cmd is required. Install it first."
+    exit 1
+  fi
+done
+
+if ! command -v gh &>/dev/null; then
+  echo "Error: GitHub CLI (gh) is required."
+  echo "  brew install gh    # macOS"
+  echo "  apt install gh     # Linux"
+  exit 1
+fi
+
+if ! gh auth status &>/dev/null 2>&1; then
+  echo "Error: gh is not authenticated. Run: gh auth login"
+  exit 1
+fi
+
+# Clone or update
+if [ -d "$INSTALL_DIR/.git" ]; then
+  echo "==> Updating existing installation"
+  git -C "$INSTALL_DIR" pull --ff-only 2>/dev/null || true
+else
+  echo "==> Cloning superpowerd"
+  mkdir -p "$(dirname "$INSTALL_DIR")"
+  gh repo clone "$REPO" "$INSTALL_DIR"
+fi
+
+# Run setup
+echo "==> Running setup"
+cd "$INSTALL_DIR"
+bash setup.sh
+
+echo ""
+echo "Done. Restart your shell or run: source ~/.zshrc"

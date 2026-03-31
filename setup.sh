@@ -143,14 +143,72 @@ for cmd in "$PROJECT_DIR"/commands/*.md; do
   [[ -f "$cmd" ]] && ln -sf "$cmd" "$COMMANDS_DIR/$(basename "$cmd")"
 done
 
+# Install persistent monitor
+echo "==> Monitor service"
+NODE_PATH=$(which node)
+if [[ "$(uname)" == "Darwin" ]]; then
+  PLIST="$HOME/Library/LaunchAgents/com.superpowerd.monitor.plist"
+  cat > "$PLIST" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.superpowerd.monitor</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$PROJECT_DIR/rotation/monitor</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$PROJECT_DIR/data/monitor.log</string>
+    <key>StandardErrorPath</key>
+    <string>$PROJECT_DIR/data/monitor.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:$(dirname "$NODE_PATH")</string>
+    </dict>
+</dict>
+</plist>
+PLIST
+  launchctl bootout gui/$(id -u) "$PLIST" 2>/dev/null || true
+  launchctl bootstrap gui/$(id -u) "$PLIST" 2>/dev/null || launchctl load "$PLIST" 2>/dev/null || true
+  echo "    Installed launchd service (com.superpowerd.monitor)"
+else
+  UNIT_DIR="$HOME/.config/systemd/user"
+  mkdir -p "$UNIT_DIR"
+  cat > "$UNIT_DIR/superpowerd-monitor.service" << UNIT
+[Unit]
+Description=superpowerd rate limit monitor
+
+[Service]
+ExecStart=/bin/bash $PROJECT_DIR/rotation/monitor
+Restart=always
+RestartSec=10
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:$(dirname "$NODE_PATH")
+
+[Install]
+WantedBy=default.target
+UNIT
+  systemctl --user daemon-reload 2>/dev/null || true
+  systemctl --user enable --now superpowerd-monitor 2>/dev/null || true
+  echo "    Installed systemd user service (superpowerd-monitor)"
+fi
+
 echo ""
 echo "=== Setup complete ==="
+echo ""
+echo "The rate limit monitor is running in the background."
 echo ""
 echo "Commands:"
 echo "  sp-rotate             Rotate to next account"
 echo "  sp-rotate --status    Show current account"
-echo "  sp-monitor --daemon   Start rate limit watcher"
-echo "  sp-monitor --stop     Stop watcher"
+echo "  sp-monitor --status   Check monitor"
 echo "  sp-dashboard          Start web dashboard"
 echo ""
 echo "Shortcuts (in WezTerm):"
@@ -159,7 +217,4 @@ echo "  Opt+Cmd+P   Open PR in browser"
 echo "  Opt+Cmd+N   Create PR"
 echo "  Opt+Cmd+R   Restart Claude"
 echo ""
-echo "Next steps:"
-echo "  1. Run: npm run browser:setup"
-echo "     (opens a browser — log into all your Google accounts)"
-echo "  2. Open WezTerm (or restart it) to activate the pane grid."
+echo "Next: Open WezTerm (or restart it) to activate the pane grid."
