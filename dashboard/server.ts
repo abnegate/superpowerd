@@ -304,118 +304,189 @@ app.get("/api/usage", (_: Request, response: Response) => {
   });
 });
 
-// Live usage from claude.ai web API (cookie-based auth via session key)
-let cachedLiveUsage: { data: unknown; fetchedAt: number } | null = null;
-
-app.get("/api/claude-usage", (_: Request, response: Response) => {
-  const now = Date.now();
-  if (cachedLiveUsage && now - cachedLiveUsage.fetchedAt < 60000) {
-    response.json(cachedLiveUsage.data);
-    return;
-  }
-
-  // Get org ID from CLI auth status
-  execFile("claude", ["auth", "status"], { timeout: 5000 }, (error, stdout) => {
-    if (error) {
-      response.json({ error: "not authenticated" });
-      return;
+// Session cookie reader (Firefox + Chrome)
+function getSessionKey(): string {
+  // Firefox
+  try {
+    const firefoxBase = join(homedir(), "Library", "Application Support", "Firefox", "Profiles");
+    const entries = readdirSync(firefoxBase);
+    const profile = entries.find((e) => e.endsWith(".default-release"));
+    if (profile) {
+      const temp = "/tmp/sp-usage-cookies.sqlite";
+      const source = join(firefoxBase, profile, "cookies.sqlite");
+      copyFileSync(source, temp);
+      try { copyFileSync(source + "-wal", temp + "-wal"); } catch {}
+      try { copyFileSync(source + "-shm", temp + "-shm"); } catch {}
+      const output = execFileSync("sqlite3", ["-separator", "\t", temp,
+        "SELECT value FROM moz_cookies WHERE host LIKE '%claude.ai%' AND name = 'sessionKey' LIMIT 1"
+      ], { encoding: "utf8", timeout: 3000 }).trim();
+      unlinkSync(temp);
+      try { unlinkSync(temp + "-wal"); } catch {}
+      try { unlinkSync(temp + "-shm"); } catch {}
+      if (output) return output;
     }
+  } catch {}
 
-    let orgId: string;
-    try {
-      orgId = JSON.parse(stdout).orgId;
-    } catch {
-      response.json({ error: "no org" });
-      return;
-    }
-
-    // Read session cookie from Firefox
-    let sessionKey = "";
-    try {
-      const firefoxBase = join(homedir(), "Library", "Application Support", "Firefox", "Profiles");
-      const entries = readdirSync(firefoxBase);
-      const profile = entries.find((e) => e.endsWith(".default-release"));
-      if (profile) {
-        const temp = "/tmp/sp-usage-cookies.sqlite";
-        const source = join(firefoxBase, profile, "cookies.sqlite");
-        copyFileSync(source, temp);
-        try { copyFileSync(source + "-wal", temp + "-wal"); } catch {}
-        try { copyFileSync(source + "-shm", temp + "-shm"); } catch {}
-        const output = execFileSync("sqlite3", ["-separator", "\t", temp,
-          "SELECT value FROM moz_cookies WHERE host LIKE '%claude.ai%' AND name = 'sessionKey' LIMIT 1"
-        ], { encoding: "utf8", timeout: 3000 }).trim();
-        unlinkSync(temp);
-        try { unlinkSync(temp + "-wal"); } catch {}
-        try { unlinkSync(temp + "-shm"); } catch {}
-        if (output) sessionKey = output;
+  // Chrome (macOS)
+  try {
+    const password = execFileSync("security", [
+      "find-generic-password", "-s", "Chrome Safe Storage", "-w"
+    ], { encoding: "utf8", timeout: 5000 }).trim();
+    const key = crypto.pbkdf2Sync(password, "saltysalt", 1003, 16, "sha1");
+    const iv = Buffer.alloc(16, 0x20);
+    const chromeDb = join(homedir(), "Library", "Application Support", "Google", "Chrome", "Default", "Cookies");
+    const temp = "/tmp/sp-chrome-usage.sqlite";
+    copyFileSync(chromeDb, temp);
+    const hex = execFileSync("sqlite3", ["-separator", "\t", temp,
+      "SELECT hex(encrypted_value) FROM cookies WHERE host_key LIKE '%claude.ai%' AND name = 'sessionKey' LIMIT 1"
+    ], { encoding: "utf8", timeout: 3000 }).trim();
+    unlinkSync(temp);
+    if (hex) {
+      const buf = Buffer.from(hex, "hex");
+      if (buf.length > 3 && buf.subarray(0, 3).toString() === "v10") {
+        const decipher = crypto.createDecipheriv("aes-128-cbc", key, iv);
+        decipher.setAutoPadding(true);
+        return Buffer.concat([decipher.update(buf.subarray(3)), decipher.final()]).toString("utf8");
       }
-    } catch {}
-
-    // Also try Chrome cookies if no Firefox session
-    if (!sessionKey) {
-      try {
-        const password = execFileSync("security", [
-          "find-generic-password", "-s", "Chrome Safe Storage", "-w"
-        ], { encoding: "utf8", timeout: 5000 }).trim();
-                const key = crypto.pbkdf2Sync(password, "saltysalt", 1003, 16, "sha1");
-        const iv = Buffer.alloc(16, 0x20);
-        const chromeDb = join(homedir(), "Library", "Application Support", "Google", "Chrome", "Default", "Cookies");
-        const temp = "/tmp/sp-chrome-usage.sqlite";
-        copyFileSync(chromeDb, temp);
-        const hex = execFileSync("sqlite3", ["-separator", "\t", temp,
-          "SELECT hex(encrypted_value) FROM cookies WHERE host_key LIKE '%claude.ai%' AND name = 'sessionKey' LIMIT 1"
-        ], { encoding: "utf8", timeout: 3000 }).trim();
-        unlinkSync(temp);
-        if (hex) {
-          const buf = Buffer.from(hex, "hex");
-          if (buf.length > 3 && buf.subarray(0, 3).toString() === "v10") {
-            const decipher = crypto.createDecipheriv("aes-128-cbc", key, iv);
-            decipher.setAutoPadding(true);
-            sessionKey = Buffer.concat([decipher.update(buf.subarray(3)), decipher.final()]).toString("utf8");
-          }
-        }
-      } catch {}
     }
+  } catch {}
 
-    if (!sessionKey) {
-      response.json({ error: "no session cookie" });
-      return;
-    }
+  return "";
+}
 
-    const options = {
+// Fetch usage for a specific org
+function fetchOrgUsage(orgId: string, sessionKey: string): Promise<any> {
+  return new Promise((resolve) => {
+    const request = https.request({
       hostname: "claude.ai",
       path: "/api/organizations/" + orgId + "/usage",
       method: "GET",
-      headers: {
-        "Cookie": "sessionKey=" + sessionKey,
-        "User-Agent": "Mozilla/5.0",
-      },
-    };
-
-    const request = https.request(options, (upstream: any) => {
+      headers: { "Cookie": "sessionKey=" + sessionKey, "User-Agent": "Mozilla/5.0" },
+    }, (upstream: any) => {
       const chunks: Buffer[] = [];
       upstream.on("data", (chunk: Buffer) => chunks.push(chunk));
       upstream.on("end", () => {
-        const body = Buffer.concat(chunks).toString("utf8");
-        try {
-          const data = JSON.parse(body);
-          if (!data.error) {
-            cachedLiveUsage = { data, fetchedAt: now };
-          }
-          response.json(data);
-        } catch {
-          response.json({ error: "parse error" });
-        }
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8"))); }
+        catch { resolve(null); }
       });
     });
-    request.on("error", (error: Error) => {
-      response.json({ error: error.message });
-    });
-    request.setTimeout(10000, () => {
-      request.destroy();
-      response.json({ error: "timeout" });
-    });
+    request.on("error", () => resolve(null));
+    request.setTimeout(10000, () => { request.destroy(); resolve(null); });
     request.end();
+  });
+}
+
+// Usage cache: { [orgId]: { data, fetchedAt } }
+const usageCache: Record<string, { data: any; fetchedAt: number }> = {};
+// Historical usage snapshots for burn rate: { [email]: { utilization, timestamp }[] }
+const usageHistoryPath = join(dataDirectory, "usage-history.json");
+
+function readUsageHistory(): Record<string, Array<{ utilization: number; timestamp: number }>> {
+  try { return JSON.parse(readFileSync(usageHistoryPath, "utf8")); } catch { return {}; }
+}
+
+function writeUsageHistory(history: Record<string, Array<{ utilization: number; timestamp: number }>>) {
+  require("fs").writeFileSync(usageHistoryPath, JSON.stringify(history) + "\n");
+}
+
+app.get("/api/claude-usage", async (_: Request, response: Response) => {
+  const sessionKey = getSessionKey();
+  if (!sessionKey) {
+    response.json({ error: "no session cookie" });
+    return;
+  }
+
+  const accounts = readAccounts();
+  let tokens: Record<string, any> = {};
+  try { tokens = JSON.parse(readFileSync(join(dataDirectory, "tokens.json"), "utf8")); } catch {}
+
+  // Get current account's org ID from CLI
+  let currentEmail = "";
+  let currentOrgId = "";
+  try {
+    const auth = JSON.parse(execFileSync("claude", ["auth", "status"], { encoding: "utf8", timeout: 5000 }));
+    currentEmail = auth.email || "";
+    currentOrgId = auth.orgId || "";
+  } catch {}
+
+  // Build org ID map from tokens.json
+  const orgMap: Record<string, string> = {};
+  for (const email of accounts) {
+    if (tokens[email]?.orgId) orgMap[email] = tokens[email].orgId;
+  }
+  if (currentEmail && currentOrgId) orgMap[currentEmail] = currentOrgId;
+
+  // Fetch usage for each account that has an org ID
+  const now = Date.now();
+  const results: Record<string, any> = {};
+
+  for (const email of accounts) {
+    const orgId = orgMap[email];
+    if (!orgId) {
+      results[email] = { error: "no org id — capture tokens first" };
+      continue;
+    }
+
+    // Use cache if fresh (60s)
+    if (usageCache[orgId] && now - usageCache[orgId].fetchedAt < 60000) {
+      results[email] = usageCache[orgId].data;
+      continue;
+    }
+
+    const data = await fetchOrgUsage(orgId, sessionKey);
+    if (data && !data.error) {
+      usageCache[orgId] = { data, fetchedAt: now };
+      results[email] = data;
+
+      // Record history for burn rate
+      const history = readUsageHistory();
+      if (!history[email]) history[email] = [];
+      history[email].push({ utilization: data.five_hour?.utilization ?? 0, timestamp: now });
+      // Keep last 100 entries
+      if (history[email].length > 100) history[email] = history[email].slice(-100);
+      writeUsageHistory(history);
+    } else {
+      results[email] = data || { error: "fetch failed" };
+    }
+  }
+
+  // Compute pooled utilization (average of available accounts)
+  const available = Object.values(results).filter((r: any) => r.five_hour && !r.error);
+  const pooledFiveHour = available.length > 0
+    ? available.reduce((sum: number, r: any) => sum + r.five_hour.utilization, 0) / available.length
+    : null;
+  const pooledSevenDay = available.length > 0
+    ? available.reduce((sum: number, r: any) => sum + r.seven_day.utilization, 0) / available.length
+    : null;
+
+  // Estimate time to next swap from burn rate (5-hour utilization)
+  let estimatedSwapMinutes: number | null = null;
+  if (currentEmail) {
+    const history = readUsageHistory();
+    const entries = history[currentEmail] || [];
+    if (entries.length >= 2) {
+      const recent = entries.slice(-10);
+      const first = recent[0];
+      const last = recent[recent.length - 1];
+      const deltaUtil = last.utilization - first.utilization;
+      const deltaMs = last.timestamp - first.timestamp;
+      if (deltaUtil > 0 && deltaMs > 0) {
+        const ratePerMs = deltaUtil / deltaMs;
+        const remaining = 100 - last.utilization;
+        estimatedSwapMinutes = Math.round(remaining / ratePerMs / 60000);
+      }
+    }
+  }
+
+  response.json({
+    accounts: results,
+    current: currentEmail,
+    pooled: {
+      fiveHour: pooledFiveHour !== null ? Math.round(pooledFiveHour) : null,
+      sevenDay: pooledSevenDay !== null ? Math.round(pooledSevenDay) : null,
+      accountCount: available.length,
+    },
+    estimatedSwapMinutes,
   });
 });
 

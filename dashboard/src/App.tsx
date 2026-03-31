@@ -162,7 +162,7 @@ export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [auth, setAuth] = useState<AuthInfo | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
-  const [claudeUsage, setClaudeUsage] = useState<Record<string, unknown> | null>(null);
+  const [claudeUsage, setClaudeUsage] = useState<any>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [rotating, setRotating] = useState(false);
   const logsEnd = useRef<HTMLDivElement>(null);
@@ -319,22 +319,32 @@ export default function App() {
                 <span className="key">org</span>
                 <span className="value">{auth.orgName}</span>
               </div>
-              {claudeUsage && (claudeUsage as any).five_hour && (
+              {claudeUsage?.accounts && (
                 <>
-                  <div className="auth-row section-break">
-                    <span className="key">current usage</span>
-                    <span className="value dim" />
-                  </div>
-                  <UsageBar
-                    label="5-hour"
-                    percent={(claudeUsage as any).five_hour.utilization}
-                    reset={(claudeUsage as any).five_hour.resets_at}
-                  />
-                  <UsageBar
-                    label="7-day"
-                    percent={(claudeUsage as any).seven_day.utilization}
-                    reset={(claudeUsage as any).seven_day.resets_at}
-                  />
+                  {claudeUsage.pooled?.fiveHour !== null && (
+                    <>
+                      <div className="auth-row section-break">
+                        <span className="key">pool ({claudeUsage.pooled.accountCount} accounts)</span>
+                        {claudeUsage.estimatedSwapMinutes !== null && (
+                          <span className="value dim">swap in ~{claudeUsage.estimatedSwapMinutes}m</span>
+                        )}
+                      </div>
+                      <UsageBar label="5h pooled" percent={claudeUsage.pooled.fiveHour} reset={null} />
+                      <UsageBar label="7d pooled" percent={claudeUsage.pooled.sevenDay} reset={null} />
+                    </>
+                  )}
+                  {Object.entries(claudeUsage.accounts).map(([email, data]: [string, any]) => (
+                    data?.five_hour && !data.error ? (
+                      <div key={email}>
+                        <div className="auth-row section-break">
+                          <span className="key">{email.split("@")[0]}</span>
+                          <span className="value dim">{email === claudeUsage.current ? "active" : ""}</span>
+                        </div>
+                        <UsageBar label="5-hour" percent={data.five_hour.utilization} reset={data.five_hour.resets_at} />
+                        <UsageBar label="7-day" percent={data.seven_day.utilization} reset={data.seven_day.resets_at} />
+                      </div>
+                    ) : null
+                  ))}
                 </>
               )}
               <div className="auth-row section-break">

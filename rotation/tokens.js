@@ -103,6 +103,25 @@ async function capture() {
     process.exit(1);
   }
 
+  // Get org ID from roles endpoint
+  let orgId = null;
+  try {
+    const rolesOutput = execFileSync("curl", [
+      "-s", "https://api.anthropic.com/api/oauth/claude_cli/roles",
+      "-H", "Authorization: Bearer " + credentials.claudeAiOauth.accessToken,
+    ], { encoding: "utf8", timeout: 10000 });
+    const roles = JSON.parse(rolesOutput);
+    orgId = roles.organization_uuid || null;
+  } catch {}
+
+  // Fall back to CLI auth status for org ID
+  if (!orgId) {
+    try {
+      const authOutput = execFileSync("claude", ["auth", "status"], { encoding: "utf8", timeout: 5000 });
+      orgId = JSON.parse(authOutput).orgId || null;
+    } catch {}
+  }
+
   const store = readTokenStore();
   store[email] = {
     accessToken: credentials.claudeAiOauth.accessToken,
@@ -111,10 +130,11 @@ async function capture() {
     scopes: credentials.claudeAiOauth.scopes,
     subscriptionType: credentials.claudeAiOauth.subscriptionType,
     rateLimitTier: credentials.claudeAiOauth.rateLimitTier,
+    orgId,
     capturedAt: new Date().toISOString(),
   };
   writeTokenStore(store);
-  log("Captured tokens for " + email);
+  log("Captured tokens for " + email + (orgId ? " (org: " + orgId + ")" : ""));
 }
 
 // Authenticate each account interactively and capture tokens
