@@ -20,12 +20,19 @@ interface AuthInfo {
   orgName?: string;
 }
 
+interface DailyEntry {
+  date: string;
+  messages: number;
+  tokens: number;
+  tools: number;
+}
+
 interface Usage {
   activeSessions: number;
   today: { messages: number; tokens: number; tools: number; rateLimits: number };
   totals: { messages: number; tokens: number; sessions: number };
   tokenExpiry: string | null;
-  dailyActivity: Array<{ date: string; messages: number; tokens: number }>;
+  dailyActivity: DailyEntry[];
 }
 
 function formatNumber(n: number): string {
@@ -37,13 +44,11 @@ function formatNumber(n: number): string {
 function formatLogLine(line: string): ReactNode {
   const match = line.match(/^\[([^\]]+)\]\s*(.*)/);
   if (!match) return <span>{line}</span>;
-
   const [, timestamp, rest] = match;
   let className = "";
   if (rest.includes("!!!") || rest.includes("Signal")) className = "signal";
   else if (rest.includes("[rotate]")) className = "rotate";
-  else if (rest.includes("Now using") || rest.includes("Switched") || rest.includes("===")) className = "success";
-
+  else if (rest.includes("Now using") || rest.includes("===")) className = "success";
   return (
     <>
       <span className="timestamp">{timestamp}</span>{" "}
@@ -52,32 +57,82 @@ function formatLogLine(line: string): ReactNode {
   );
 }
 
-function Metric({ label, value, unit }: { label: string; value: string; unit?: string }) {
-  return (
-    <div className="metric">
-      <div className="metric-value">
-        {value}
-        {unit && <span className="metric-unit">{unit}</span>}
-      </div>
-      <div className="metric-label">{label}</div>
-    </div>
-  );
-}
-
-function Sparkline({ data, height = 32 }: { data: number[]; height?: number }) {
-  if (data.length < 2) return null;
+function Sparkline({ data, height = 48 }: { data: number[]; height?: number }) {
+  if (data.length < 2) return <div className="sparkline-empty">no data</div>;
   const max = Math.max(...data, 1);
-  const width = 100;
-  const points = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * width;
-    const y = height - (v / max) * (height - 4);
-    return `${x},${y}`;
-  }).join(" ");
+  const width = 200;
+  const step = width / (data.length - 1);
+
+  const points = data.map((v, i) => `${i * step},${height - (v / max) * (height - 6)}`).join(" ");
+  const fillPoints = `0,${height} ${points} ${(data.length - 1) * step},${height}`;
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="sparkline" preserveAspectRatio="none">
+      <polygon points={fillPoints} fill="url(#sparkFill)" />
       <polyline points={points} fill="none" stroke="var(--green)" strokeWidth="1.5" />
+      <defs>
+        <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--green)" stopOpacity="0.15" />
+          <stop offset="100%" stopColor="var(--green)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
     </svg>
+  );
+}
+
+type ChartRange = 1 | 7 | 14 | 30;
+
+function ActivityChart({ activity }: { activity: DailyEntry[] }) {
+  const [range, setRange] = useState<ChartRange>(14);
+  const data = activity.slice(-range);
+  const ranges: ChartRange[] = [1, 7, 14, 30];
+
+  const latestMessages = data.length > 0 ? data[data.length - 1].messages : 0;
+  const latestTokens = data.length > 0 ? data[data.length - 1].tokens : 0;
+  const totalMessages = data.reduce((sum, d) => sum + d.messages, 0);
+  const totalTokens = data.reduce((sum, d) => sum + d.tokens, 0);
+
+  return (
+    <>
+      <div className="chart-header">
+        <h2>// activity</h2>
+        <div className="chart-tabs">
+          {ranges.map((r) => (
+            <button
+              key={r}
+              className={`chart-tab ${range === r ? "active" : ""}`}
+              onClick={() => setRange(r)}
+            >
+              {r}d
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="chart-grid">
+        <div className="chart-block">
+          <div className="chart-block-header">
+            <span className="chart-block-label">messages</span>
+            <span className="chart-block-value">{formatNumber(totalMessages)} total</span>
+          </div>
+          <Sparkline data={data.map((d) => d.messages)} />
+          <div className="chart-block-footer">
+            <span>latest: {formatNumber(latestMessages)}</span>
+            <span>avg: {formatNumber(data.length > 0 ? Math.round(totalMessages / data.length) : 0)}/day</span>
+          </div>
+        </div>
+        <div className="chart-block">
+          <div className="chart-block-header">
+            <span className="chart-block-label">tokens</span>
+            <span className="chart-block-value">{formatNumber(totalTokens)} total</span>
+          </div>
+          <Sparkline data={data.map((d) => d.tokens)} />
+          <div className="chart-block-footer">
+            <span>latest: {formatNumber(latestTokens)}</span>
+            <span>avg: {formatNumber(data.length > 0 ? Math.round(totalTokens / data.length) : 0)}/day</span>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -91,14 +146,14 @@ export default function App() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [statusResponse, authResponse, usageResponse] = await Promise.all([
+      const [s, a, u] = await Promise.all([
         fetch("/api/status"),
         fetch("/api/auth"),
         fetch("/api/usage"),
       ]);
-      setStatus(await statusResponse.json());
-      setAuth(await authResponse.json());
-      setUsage(await usageResponse.json());
+      setStatus(await s.json());
+      setAuth(await a.json());
+      setUsage(await u.json());
     } catch {}
   }, []);
 
@@ -112,7 +167,7 @@ export default function App() {
     const source = new EventSource("/api/logs");
     source.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      setLogs((previous) => [...previous.slice(-500), data.line]);
+      setLogs((prev) => [...prev.slice(-500), data.line]);
     };
     return () => source.close();
   }, []);
@@ -148,7 +203,7 @@ export default function App() {
     );
   }
 
-  const tokenExpiryMinutes = usage?.tokenExpiry
+  const tokenMinutes = usage?.tokenExpiry
     ? Math.max(0, Math.floor((new Date(usage.tokenExpiry).getTime() - Date.now()) / 60000))
     : null;
 
@@ -163,34 +218,39 @@ export default function App() {
       </header>
 
       <div className="grid">
-        <div className="card full metrics-row">
-          <Metric
-            label="active sessions"
-            value={String(usage?.activeSessions ?? 0)}
-          />
-          <Metric
-            label="today messages"
-            value={formatNumber(usage?.today.messages ?? 0)}
-          />
-          <Metric
-            label="today tokens"
-            value={formatNumber(usage?.today.tokens ?? 0)}
-          />
-          <Metric
-            label="today tools"
-            value={formatNumber(usage?.today.tools ?? 0)}
-          />
-          <Metric
-            label="rate limits today"
-            value={String(usage?.today.rateLimits ?? 0)}
-          />
-          {tokenExpiryMinutes !== null && (
-            <Metric
-              label="token expires"
-              value={String(tokenExpiryMinutes)}
-              unit="min"
-            />
-          )}
+        <div className="card full">
+          <div className="metrics">
+            <div className="metric">
+              <div className="metric-value">{usage?.activeSessions ?? 0}</div>
+              <div className="metric-label">sessions</div>
+            </div>
+            <div className="metric">
+              <div className="metric-value">{formatNumber(usage?.today.messages ?? 0)}</div>
+              <div className="metric-label">messages</div>
+            </div>
+            <div className="metric">
+              <div className="metric-value">{formatNumber(usage?.today.tokens ?? 0)}</div>
+              <div className="metric-label">tokens</div>
+            </div>
+            <div className="metric">
+              <div className="metric-value">{formatNumber(usage?.today.tools ?? 0)}</div>
+              <div className="metric-label">tool calls</div>
+            </div>
+            <div className="metric">
+              <div className={`metric-value ${(usage?.today.rateLimits ?? 0) > 0 ? "warn" : ""}`}>
+                {usage?.today.rateLimits ?? 0}
+              </div>
+              <div className="metric-label">429s</div>
+            </div>
+            {tokenMinutes !== null && (
+              <div className="metric">
+                <div className={`metric-value ${tokenMinutes < 30 ? "warn" : ""}`}>
+                  {tokenMinutes}<span className="metric-unit">m</span>
+                </div>
+                <div className="metric-label">token ttl</div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="card">
@@ -202,9 +262,7 @@ export default function App() {
                 {i === status.current ? (
                   <span className="label">active</span>
                 ) : (
-                  <button onClick={() => handleRotate(email)} disabled={rotating}>
-                    switch
-                  </button>
+                  <button onClick={() => handleRotate(email)} disabled={rotating}>switch</button>
                 )}
               </div>
             ))}
@@ -233,16 +291,10 @@ export default function App() {
                 <span className="value">{auth.orgName}</span>
               </div>
               <div className="auth-row">
-                <span className="key">sessions</span>
-                <span className="value">{formatNumber(usage?.totals.sessions ?? 0)} total</span>
-              </div>
-              <div className="auth-row">
-                <span className="key">messages</span>
-                <span className="value">{formatNumber(usage?.totals.messages ?? 0)} total</span>
-              </div>
-              <div className="auth-row">
-                <span className="key">tokens</span>
-                <span className="value">{formatNumber(usage?.totals.tokens ?? 0)} total</span>
+                <span className="key">lifetime</span>
+                <span className="value">
+                  {formatNumber(usage?.totals.sessions ?? 0)} sessions / {formatNumber(usage?.totals.messages ?? 0)} msgs / {formatNumber(usage?.totals.tokens ?? 0)} tok
+                </span>
               </div>
             </div>
           ) : (
@@ -250,9 +302,7 @@ export default function App() {
           )}
           <div className="controls">
             {status.monitor.running ? (
-              <button className="danger" onClick={() => handleMonitor("stop")}>
-                stop monitor
-              </button>
+              <button className="danger" onClick={() => handleMonitor("stop")}>stop monitor</button>
             ) : (
               <button onClick={() => handleMonitor("start")}>start monitor</button>
             )}
@@ -261,17 +311,7 @@ export default function App() {
 
         {usage && usage.dailyActivity.length > 1 && (
           <div className="card full">
-            <h2>// 14-day activity</h2>
-            <div className="sparkline-row">
-              <div className="sparkline-block">
-                <div className="sparkline-label">messages</div>
-                <Sparkline data={usage.dailyActivity.map((d) => d.messages)} height={40} />
-              </div>
-              <div className="sparkline-block">
-                <div className="sparkline-label">tokens</div>
-                <Sparkline data={usage.dailyActivity.map((d) => d.tokens)} height={40} />
-              </div>
-            </div>
+            <ActivityChart activity={usage.dailyActivity} />
           </div>
         )}
 
@@ -282,9 +322,7 @@ export default function App() {
               <div className="empty">waiting for log entries...</div>
             ) : (
               logs.map((line, i) => (
-                <div key={i} className="log-line">
-                  {formatLogLine(line)}
-                </div>
+                <div key={i} className="log-line">{formatLogLine(line)}</div>
               ))
             )}
             <div ref={logsEnd} />

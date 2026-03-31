@@ -186,7 +186,7 @@ app.get("/api/usage", (_: Request, response: Response) => {
   let totalTokens = 0;
   let totalMessages = 0;
   let totalSessions = 0;
-  const dailyActivity: Array<{ date: string; messages: number; tokens: number }> = [];
+  const dailyActivity: Array<{ date: string; messages: number; tokens: number; tools: number }> = [];
 
   try {
     const stats = JSON.parse(readFileSync(statsPath, "utf8"));
@@ -200,7 +200,7 @@ app.get("/api/usage", (_: Request, response: Response) => {
       }
     }
 
-    // Daily activity (last 14 days)
+    // Daily activity (all available)
     const activity = stats.dailyActivity || [];
     const modelTokens = stats.dailyModelTokens || [];
     const tokensByDate: Record<string, number> = {};
@@ -213,14 +213,22 @@ app.get("/api/usage", (_: Request, response: Response) => {
     }
 
     const today = new Date().toISOString().slice(0, 10);
-    for (const entry of activity.slice(-14)) {
+    for (const entry of activity) {
       const tokens = tokensByDate[entry.date] || 0;
-      dailyActivity.push({ date: entry.date, messages: entry.messageCount, tokens });
+      dailyActivity.push({ date: entry.date, messages: entry.messageCount, tokens, tools: entry.toolCallCount || 0 });
       if (entry.date === today) {
         todayMessages = entry.messageCount;
         todayTools = entry.toolCallCount;
         todayTokens = tokens;
       }
+    }
+
+    // If today has no entry yet, use the most recent day as "latest"
+    if (todayMessages === 0 && activity.length > 0) {
+      const latest = activity[activity.length - 1];
+      todayMessages = latest.messageCount;
+      todayTools = latest.toolCallCount || 0;
+      todayTokens = tokensByDate[latest.date] || 0;
     }
   } catch {}
 
