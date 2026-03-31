@@ -59,15 +59,37 @@ function getMonitorPid(): string | null {
 app.get("/api/status", (_: Request, response: Response) => {
   const accounts = readAccounts();
   const state = readState();
-  response.json({
-    accounts,
-    current: state.current,
-    email: accounts[state.current] || "unknown",
-    timestamp: state.timestamp || null,
-    monitor: {
-      running: isMonitorRunning(),
-      pid: getMonitorPid(),
-    },
+
+  // Use CLI auth as source of truth for active account
+  execFile("claude", ["auth", "status"], { timeout: 5000 }, (error, stdout) => {
+    let current = state.current;
+    let email = accounts[current] || "unknown";
+
+    if (!error && stdout) {
+      try {
+        const auth = JSON.parse(stdout);
+        if (auth.email) {
+          const index = accounts.indexOf(auth.email);
+          if (index !== -1) {
+            current = index;
+            email = auth.email;
+          } else {
+            email = auth.email;
+          }
+        }
+      } catch {}
+    }
+
+    response.json({
+      accounts,
+      current,
+      email,
+      timestamp: state.timestamp || null,
+      monitor: {
+        running: isMonitorRunning(),
+        pid: getMonitorPid(),
+      },
+    });
   });
 });
 
