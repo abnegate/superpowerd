@@ -504,7 +504,7 @@ app.get("/api/claude-usage", async (_: Request, response: Response) => {
     pooled: {
       fiveHour: pooledFiveHour !== null ? Math.round(pooledFiveHour) : null,
       sevenDay: pooledSevenDay !== null ? Math.round(pooledSevenDay) : null,
-      accountCount: withData.length,
+      accountCount: totalAccounts,
     },
     estimatedSwapMinutes,
   });
