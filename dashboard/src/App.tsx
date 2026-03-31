@@ -28,11 +28,11 @@ function formatLogLine(line: string): ReactNode {
   let className = "";
   if (rest.includes("!!!") || rest.includes("Signal")) className = "signal";
   else if (rest.includes("[rotate]")) className = "rotate";
-  else if (rest.includes("Now using") || rest.includes("Switched")) className = "success";
+  else if (rest.includes("Now using") || rest.includes("Switched") || rest.includes("===")) className = "success";
 
   return (
     <>
-      <span className="timestamp">[{timestamp}]</span>{" "}
+      <span className="timestamp">{timestamp}</span>{" "}
       <span className={className}>{rest}</span>
     </>
   );
@@ -99,7 +99,7 @@ export default function App() {
   if (!status) {
     return (
       <div className="app">
-        <div className="empty">Connecting to server...</div>
+        <div className="empty">connecting...</div>
       </div>
     );
   }
@@ -107,78 +107,74 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <h1>
-          super<span>powerd</span>
-        </h1>
+        <h1>super<span>powerd</span></h1>
         <div className={`badge ${status.monitor.running ? "running" : "stopped"}`}>
-          <div className={`dot ${status.monitor.running ? "pulse" : ""}`} />
-          Monitor {status.monitor.running ? "active" : "idle"}
+          <div className="dot" />
+          {status.monitor.running ? "monitoring" : "idle"}
         </div>
       </header>
 
       <div className="grid">
         <div className="card">
-          <h2>Accounts</h2>
+          <h2>// accounts</h2>
           <div className="accounts">
             {status.accounts.map((email, i) => (
               <div key={email} className={`account ${i === status.current ? "active" : ""}`}>
                 <span className="email">{email}</span>
                 {i === status.current ? (
-                  <span className="label">ACTIVE</span>
+                  <span className="label">active</span>
                 ) : (
                   <button onClick={() => handleRotate(email)} disabled={rotating}>
-                    Switch
+                    switch
                   </button>
                 )}
               </div>
             ))}
           </div>
+          <div className="controls">
+            <button className="primary" onClick={() => handleRotate()} disabled={rotating}>
+              {rotating ? "rotating..." : "rotate next"}
+            </button>
+          </div>
         </div>
 
         <div className="card">
-          <h2>CLI Auth</h2>
+          <h2>// auth</h2>
           {auth?.authenticated ? (
             <div className="auth-info">
               <div className="auth-row">
-                <span className="key">Email</span>
+                <span className="key">email</span>
                 <span className="value">{auth.email}</span>
               </div>
               <div className="auth-row">
-                <span className="key">Plan</span>
+                <span className="key">plan</span>
                 <span className="value">{auth.subscriptionType}</span>
               </div>
               <div className="auth-row">
-                <span className="key">Org</span>
+                <span className="key">org</span>
                 <span className="value">{auth.orgName}</span>
               </div>
             </div>
           ) : (
-            <div className="empty">Not authenticated</div>
+            <div className="empty">not authenticated</div>
           )}
-
-          <div style={{ marginTop: 20 }}>
-            <h2>Controls</h2>
-            <div className="controls">
-              <button className="primary" onClick={() => handleRotate()} disabled={rotating}>
-                {rotating ? "Rotating..." : "Rotate Next"}
+          <div className="controls">
+            {status.monitor.running ? (
+              <button className="danger" onClick={() => handleMonitor("stop")}>
+                stop monitor
               </button>
-              {status.monitor.running ? (
-                <button className="danger" onClick={() => handleMonitor("stop")}>
-                  Stop Monitor
-                </button>
-              ) : (
-                <button onClick={() => handleMonitor("start")}>Start Monitor</button>
-              )}
-            </div>
+            ) : (
+              <button onClick={() => handleMonitor("start")}>start monitor</button>
+            )}
           </div>
         </div>
 
         <div className="card full">
-          <h2>Log Stream</h2>
+          <h2>// log stream</h2>
           <div className="logs">
             {logs.length === 0 ? (
               <div className="empty">
-                No log entries yet. Start the monitor to begin watching for rate limits.
+                waiting for log entries...
               </div>
             ) : (
               logs.map((line, i) => (
