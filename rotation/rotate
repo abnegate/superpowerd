@@ -4,8 +4,8 @@
 # Flow:
 #   1. Save current account's tokens
 #   2. Swap keychain entry to the next account
-#   3. Kill Claude in each WezTerm pane, restart with --continue
-#   4. Send "continue" to resume work automatically
+#   3. For each WezTerm pane: capture session ID, kill Claude,
+#      restart with --resume <id>, send "continue where you left off"
 #
 # Usage:
 #   rotate              # Next account
@@ -18,7 +18,6 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DATA_DIR="$PROJECT_DIR/data"
 STATE_FILE="$DATA_DIR/state.json"
 ACCOUNTS_FILE="$PROJECT_DIR/accounts.conf"
-TOKENS_FILE="$DATA_DIR/tokens.json"
 LOG_FILE="$DATA_DIR/rotate.log"
 
 mkdir -p "$DATA_DIR"
@@ -70,6 +69,39 @@ update_state() {
   "
 }
 
+# Find the session ID for a Claude process running in a given WezTerm pane.
+# Maps: pane CWD -> matching session file by CWD + active PID
+find_session_id() {
+  local pane_id="$1"
+  # Get the pane's CWD from wezterm cli list
+  local pane_cwd
+  pane_cwd=$(wezterm cli list 2>/dev/null | awk -v id="$pane_id" '$3 == id {print $NF}' | sed 's|file://[^/]*||')
+
+  if [[ -z "$pane_cwd" ]]; then
+    return
+  fi
+
+  # Find all claude processes and match by CWD via session files
+  for session_file in "$HOME/.claude/sessions"/*.json; do
+    [[ -f "$session_file" ]] || continue
+    local info
+    info=$(node -e "
+      var s = JSON.parse(require('fs').readFileSync('$session_file','utf8'));
+      // Check the PID is still running
+      try { process.kill(s.pid, 0); } catch { process.exit(1); }
+      console.log(s.sessionId + '\t' + s.cwd);
+    " 2>/dev/null) || continue
+
+    local sid="${info%%	*}"
+    local scwd="${info##*	}"
+
+    if [[ "$scwd" == "$pane_cwd" ]]; then
+      echo "$sid"
+      return
+    fi
+  done
+}
+
 CURRENT=$(get_current)
 CURRENT_EMAIL=${ACCOUNTS[$CURRENT]}
 
@@ -116,22 +148,9 @@ notify "Rotating to $NEXT_EMAIL..."
 log "Step 1: Saving current tokens"
 node "$SCRIPT_DIR/tokens.js" capture 2>&1 | while read -r line; do log "  $line"; done
 
-# Step 2: Swap keychain to next account
-log "Step 2: Swapping keychain"
-if ! node "$SCRIPT_DIR/tokens.js" swap "$NEXT_EMAIL" 2>&1 | while read -r line; do log "  $line"; done; then
-  log "No stored tokens for $NEXT_EMAIL — authenticating via browser"
-  notify "Authenticating $NEXT_EMAIL..."
-  claude auth logout 2>/dev/null || true
-  node "$SCRIPT_DIR/browser-auth.js" login "$NEXT_EMAIL" 2>&1 | while read -r line; do log "  $line"; done
-  node "$SCRIPT_DIR/tokens.js" capture 2>&1 | while read -r line; do log "  $line"; done
-fi
-
-# Step 3: Update state
-log "Step 3: State update"
-update_state "$NEXT_INDEX" "$NEXT_EMAIL"
-
-# Step 4: Restart Claude in all panes with --continue, then send "continue"
-log "Step 4: Restarting agents"
+# Step 2: Capture session IDs BEFORE killing anything
+log "Step 2: Capturing session IDs"
+declare -A PANE_SESSIONS=()
 if command -v wezterm &>/dev/null; then
   PANE_IDS=$(wezterm cli list 2>/dev/null | tail -n +2 | awk '{print $3}' || true)
   CURRENT_PANE=${WEZTERM_PANE:-}
@@ -140,27 +159,64 @@ if command -v wezterm &>/dev/null; then
     [[ "$pane_id" == "$CURRENT_PANE" ]] && continue
     TEXT=$(wezterm cli get-text --pane-id "$pane_id" 2>/dev/null | tail -5 || true)
     if echo "$TEXT" | grep -qiE '(claude|[>❯✻✽]|\/login|\$ claude)'; then
-      log "  Restarting pane $pane_id"
-      # Kill current Claude process
-      wezterm cli send-text --pane-id "$pane_id" --no-paste $'\x03' 2>/dev/null || true
-      sleep 0.5
-      # Restart with --continue to load conversation history
-      wezterm cli send-text --pane-id "$pane_id" "claude --dangerously-skip-permissions --continue" 2>/dev/null || true
-      wezterm cli send-text --pane-id "$pane_id" --no-paste $'\r' 2>/dev/null || true
+      SESSION_ID=$(find_session_id "$pane_id")
+      if [[ -n "$SESSION_ID" ]]; then
+        PANE_SESSIONS[$pane_id]="$SESSION_ID"
+        log "  Pane $pane_id -> session $SESSION_ID"
+      else
+        log "  Pane $pane_id -> no session found (will use --continue)"
+      fi
     fi
   done
+fi
 
-  # Wait for all sessions to start, then send "continue" to each
-  sleep 4
+# Step 3: Swap keychain to next account
+log "Step 3: Swapping keychain"
+if ! node "$SCRIPT_DIR/tokens.js" swap "$NEXT_EMAIL" 2>&1 | while read -r line; do log "  $line"; done; then
+  log "No stored tokens for $NEXT_EMAIL — authenticating via browser"
+  notify "Authenticating $NEXT_EMAIL..."
+  claude auth logout 2>/dev/null || true
+  node "$SCRIPT_DIR/browser-auth.js" login "$NEXT_EMAIL" 2>&1 | while read -r line; do log "  $line"; done
+  node "$SCRIPT_DIR/tokens.js" capture 2>&1 | while read -r line; do log "  $line"; done
+fi
+
+# Step 4: Update state
+log "Step 4: State update"
+update_state "$NEXT_INDEX" "$NEXT_EMAIL"
+
+# Step 5: Kill and restart each pane with its captured session ID
+log "Step 5: Restarting agents"
+if command -v wezterm &>/dev/null; then
   for pane_id in $PANE_IDS; do
     [[ "$pane_id" == "$CURRENT_PANE" ]] && continue
-    TEXT=$(wezterm cli get-text --pane-id "$pane_id" 2>/dev/null | tail -5 || true)
-    if echo "$TEXT" | grep -qiE '(claude|[>❯✻✽])'; then
-      log "  Sending continue to pane $pane_id"
-      wezterm cli send-text --pane-id "$pane_id" "continue where you left off" 2>/dev/null || true
-      wezterm cli send-text --pane-id "$pane_id" --no-paste $'\r' 2>/dev/null || true
-      sleep 0.3
+
+    SESSION_ID="${PANE_SESSIONS[$pane_id]:-}"
+    if [[ -z "$SESSION_ID" ]]; then
+      # Not a Claude pane or no session found
+      continue
     fi
+
+    log "  Restarting pane $pane_id (session $SESSION_ID)"
+    # Kill current Claude process
+    wezterm cli send-text --pane-id "$pane_id" --no-paste $'\x03' 2>/dev/null || true
+    sleep 0.5
+    # Restart with exact session ID
+    wezterm cli send-text --pane-id "$pane_id" "claude --dangerously-skip-permissions --resume $SESSION_ID" 2>/dev/null || true
+    wezterm cli send-text --pane-id "$pane_id" --no-paste $'\r' 2>/dev/null || true
+  done
+
+  # Wait for all sessions to start, then send continue
+  log "  Waiting for agents to start..."
+  sleep 5
+  for pane_id in $PANE_IDS; do
+    [[ "$pane_id" == "$CURRENT_PANE" ]] && continue
+    SESSION_ID="${PANE_SESSIONS[$pane_id]:-}"
+    [[ -z "$SESSION_ID" ]] && continue
+
+    log "  Sending continue to pane $pane_id"
+    wezterm cli send-text --pane-id "$pane_id" "continue where you left off" 2>/dev/null || true
+    wezterm cli send-text --pane-id "$pane_id" --no-paste $'\r' 2>/dev/null || true
+    sleep 0.3
   done
 fi
 
@@ -168,4 +224,4 @@ log "=== Now using: $NEXT_EMAIL ==="
 notify "Now using $NEXT_EMAIL"
 echo ""
 echo "Switched to: $NEXT_EMAIL"
-echo "All agents restarted with --continue and prompted to resume."
+echo "All agents restarted with their session IDs and prompted to resume."
