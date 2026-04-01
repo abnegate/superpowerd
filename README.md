@@ -6,6 +6,8 @@ Multi-account Claude Code workspace manager. Automatic rate limit detection, sea
 
 ![History](screenshots/history.png)
 
+![Insights](screenshots/insights.png)
+
 ## The problem
 
 Claude Code's Max plan has usage limits. When you hit them, you wait. If you have multiple accounts, you can rotate between them — but doing it manually means logging out of claude.ai, switching Google accounts, re-authenticating the CLI, and repeating across every terminal. Superpowerd automates all of that.
