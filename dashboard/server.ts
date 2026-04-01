@@ -822,6 +822,9 @@ app.get("/api/history-extended", (_: Request, response: Response) => {
   let currentStreak = 0;
   let longestStreak = 0;
   let streak = 0;
+  let longestStart = "";
+  let longestEnd = "";
+  let streakStart = "";
   const allDates: string[] = [];
   if (firstDate && lastDate) {
     const cursor = new Date(firstDate);
@@ -833,8 +836,13 @@ app.get("/api/history-extended", (_: Request, response: Response) => {
   }
   for (const date of allDates) {
     if (activeDays.has(date)) {
+      if (streak === 0) streakStart = date;
       streak++;
-      if (streak > longestStreak) longestStreak = streak;
+      if (streak > longestStreak) {
+        longestStreak = streak;
+        longestStart = streakStart;
+        longestEnd = date;
+      }
     } else {
       streak = 0;
     }
@@ -879,7 +887,24 @@ app.get("/api/history-extended", (_: Request, response: Response) => {
     topRepos,
     hourly,
     heatmapData,
-    streaks: { current: currentStreak, longest: longestStreak },
+    streaks: { current: currentStreak, longest: longestStreak, longestStart, longestEnd },
+  });
+});
+
+// Self-update
+const updateScript = join(projectDirectory, "rotation", "update");
+
+app.get("/api/update/check", (_: Request, response: Response) => {
+  execFile(updateScript, ["--check"], { timeout: 15000 }, (error, stdout) => {
+    const output = ((error?.stdout as string) || stdout || "").trim();
+    response.json({ available: !output.includes("Already up to date"), output });
+  });
+});
+
+app.post("/api/update", (_: Request, response: Response) => {
+  response.json({ status: "updating" });
+  execFile(updateScript, [], { timeout: 120000 }, (error, _stdout, stderr) => {
+    if (error) console.error("Update error:", stderr);
   });
 });
 

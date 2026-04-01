@@ -110,12 +110,13 @@ export CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1
 [[ -f ~/.config/iterm2/pane-title.zsh ]] && source ~/.config/iterm2/pane-title.zsh
 alias sp-rotate="$PROJECT_DIR/rotation/rotate"
 alias sp-monitor="$PROJECT_DIR/rotation/monitor"
+alias sp-update="$PROJECT_DIR/rotation/update"
 alias sp-dashboard="node $PROJECT_DIR/dashboard/server.js"
 BLOCK
 fi
 
 # Make scripts executable
-chmod +x "$PROJECT_DIR/rotation/rotate" "$PROJECT_DIR/rotation/monitor" "$PROJECT_DIR/rotation/browser-auth.js" "$PROJECT_DIR/rotation/token-helper" "$PROJECT_DIR/rotation/tokens.js"
+chmod +x "$PROJECT_DIR/rotation/rotate" "$PROJECT_DIR/rotation/monitor" "$PROJECT_DIR/rotation/browser-auth.js" "$PROJECT_DIR/rotation/tokens.js" "$PROJECT_DIR/rotation/update"
 
 # Initialize data directory
 mkdir -p "$PROJECT_DIR/data"
