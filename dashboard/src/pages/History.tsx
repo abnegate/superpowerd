@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { formatNumber, formatCurrency, BarChart, AreaChart, Sparkline, MiniMetric } from "../components/Charts";
 
 type CostRange = 14 | 30 | 90 | 0;
@@ -6,7 +6,6 @@ type CostRange = 14 | 30 | 90 | 0;
 function ActivityHeatmap({ data }: { data: Array<{ date: string; hour: number; count: number }> }) {
   if (!data || data.length === 0) return <div className="empty">no data</div>;
 
-  // Build lookup
   const lookup: Record<string, number> = {};
   let max = 1;
   for (const d of data) {
@@ -15,12 +14,10 @@ function ActivityHeatmap({ data }: { data: Array<{ date: string; hour: number; c
     if (d.count > max) max = d.count;
   }
 
-  // Get all dates in range
   const dates = [...new Set(data.map((d) => d.date))].sort();
   const firstDate = new Date(dates[0]);
   const lastDate = new Date(dates[dates.length - 1]);
 
-  // Fill all days in range (including inactive days)
   const allDays: string[] = [];
   const cursor = new Date(firstDate);
   while (cursor <= lastDate) {
@@ -28,10 +25,16 @@ function ActivityHeatmap({ data }: { data: Array<{ date: string; hour: number; c
     cursor.setDate(cursor.getDate() + 1);
   }
 
-  // Y-axis: hours 0-23, X-axis: days
   const hours = Array.from({ length: 24 }, (_, i) => i);
-  const cellSize = Math.max(3, Math.min(5, Math.floor(800 / allDays.length)));
-  const gap = 0;
+
+  // Month label positions as percentage offsets
+  const monthLabels = allDays
+    .map((d, i) => ({ date: d, idx: i }))
+    .filter(({ date, idx }) => date.endsWith("-01") || idx === 0)
+    .map(({ date, idx }) => ({
+      month: new Date(date).toLocaleString("en", { month: "short" }),
+      pct: (idx / allDays.length) * 100,
+    }));
 
   function intensity(count: number): string {
     if (count === 0) return "transparent";
@@ -51,12 +54,12 @@ function ActivityHeatmap({ data }: { data: Array<{ date: string; hour: number; c
   }
 
   return (
-    <div style={{ overflowX: "auto" }}>
-      <div style={{ display: "inline-flex", gap: 0 }}>
+    <div>
+      <div style={{ display: "flex", height: 140 }}>
         {/* Y-axis labels */}
-        <div style={{ display: "flex", flexDirection: "column", gap, marginRight: 4, flexShrink: 0 }}>
+        <div style={{ display: "flex", flexDirection: "column", marginRight: 4, flexShrink: 0, width: 24 }}>
           {hours.map((h) => (
-            <div key={h} style={{ height: cellSize, display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+            <div key={h} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
               {h % 6 === 0 && (
                 <span style={{ fontFamily: "var(--mono)", fontSize: 8, color: "var(--muted)", whiteSpace: "nowrap" }}>
                   {hourLabel(h)}
@@ -66,46 +69,43 @@ function ActivityHeatmap({ data }: { data: Array<{ date: string; hour: number; c
           ))}
         </div>
         {/* Grid */}
-        {allDays.map((day) => (
-          <div key={day} style={{ display: "flex", flexDirection: "column", gap }}>
-            {hours.map((h) => {
-              const count = lookup[day + "-" + h] || 0;
-              return (
-                <div
-                  key={h}
-                  title={`${day} ${hourLabel(h)}: ${count} prompts`}
-                  style={{
-                    width: cellSize,
-                    height: cellSize,
-                    background: intensity(count),
-                  }}
-                />
-              );
-            })}
-          </div>
-        ))}
+        <div style={{ display: "flex", flex: 1, minWidth: 0 }}>
+          {allDays.map((day) => (
+            <div key={day} style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
+              {hours.map((h) => {
+                const count = lookup[day + "-" + h] || 0;
+                return (
+                  <div
+                    key={h}
+                    title={`${day} ${hourLabel(h)}: ${count} prompts`}
+                    style={{
+                      flex: 1,
+                      background: intensity(count),
+                    }}
+                  />
+                );
+              })}
+            </div>
+          ))}
+        </div>
       </div>
       {/* X-axis month labels */}
-      <div style={{ display: "flex", marginTop: 4, marginLeft: 24 }}>
-        {allDays.filter((d) => d.endsWith("-01") || d === allDays[0]).map((d) => {
-          const idx = allDays.indexOf(d);
-          const month = new Date(d).toLocaleString("en", { month: "short" });
-          return (
-            <span
-              key={d}
-              style={{
-                position: "relative",
-                left: idx * (cellSize + gap),
-                fontFamily: "var(--mono)",
-                fontSize: 8,
-                color: "var(--muted)",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {month}
-            </span>
-          );
-        })}
+      <div style={{ position: "relative", height: 14, marginLeft: 28 }}>
+        {monthLabels.map(({ month, pct }) => (
+          <span
+            key={month + pct}
+            style={{
+              position: "absolute",
+              left: pct + "%",
+              fontFamily: "var(--mono)",
+              fontSize: 8,
+              color: "var(--muted)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {month}
+          </span>
+        ))}
       </div>
     </div>
   );
@@ -140,9 +140,15 @@ export default function History({ history, usage, extended, tools }: { history: 
           <MiniMetric value={formatNumber(extended?.total ?? 0)} label="total prompts" />
           <MiniMetric value={String(extended?.daysActive ?? 0)} label="days active" />
           <MiniMetric value={String(extended?.streaks?.current ?? 0)} label="current streak" unit="d" />
-          <MiniMetric value={String(extended?.streaks?.longest ?? 0)} label="longest streak" unit="d" />
+          <MiniMetric
+            value={String(extended?.streaks?.longest ?? 0)}
+            label={extended?.streaks?.longestStart
+              ? `${extended.streaks.longestStart.slice(5)} — ${extended.streaks.longestEnd.slice(5)}`
+              : "longest streak"}
+            unit="d"
+          />
           <div className="metric">
-            <div className="metric-value cost">${formatNumber(history?.totalCost ?? 0)}</div>
+            <div className="metric-value cost">${(extended?.daysActive > 0 ? (history?.totalCost ?? 0) / extended.daysActive : 0).toFixed(0)}</div>
             <div className="metric-label">avg/day</div>
           </div>
         </div>
