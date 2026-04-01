@@ -30,16 +30,16 @@ function ActivityHeatmap({ data }: { data: Array<{ date: string; hour: number; c
 
   // Y-axis: hours 0-23, X-axis: days
   const hours = Array.from({ length: 24 }, (_, i) => i);
-  const cellSize = Math.max(3, Math.min(6, Math.floor(800 / allDays.length)));
-  const gap = 1;
+  const cellSize = Math.max(3, Math.min(5, Math.floor(800 / allDays.length)));
+  const gap = 0;
 
   function intensity(count: number): string {
-    if (count === 0) return "var(--border)";
+    if (count === 0) return "transparent";
     const pct = count / max;
-    if (pct < 0.15) return "rgba(65, 168, 62, 0.15)";
-    if (pct < 0.3) return "rgba(65, 168, 62, 0.3)";
-    if (pct < 0.5) return "rgba(65, 168, 62, 0.5)";
-    if (pct < 0.75) return "rgba(115, 218, 112, 0.75)";
+    if (pct < 0.15) return "rgba(65, 168, 62, 0.2)";
+    if (pct < 0.3) return "rgba(65, 168, 62, 0.4)";
+    if (pct < 0.5) return "rgba(65, 168, 62, 0.6)";
+    if (pct < 0.75) return "rgba(115, 218, 112, 0.8)";
     return "var(--bright-green)";
   }
 
