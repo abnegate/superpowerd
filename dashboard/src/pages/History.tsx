@@ -33,12 +33,16 @@ function HourHeatmap({ data }: { data: Record<string, number> }) {
   );
 }
 
-export default function History({ history, usage }: { history: any; usage: any }) {
+export default function History({ history, usage, extended }: { history: any; usage: any; extended: any }) {
   const [costRange, setCostRange] = useState<CostRange>(30);
+  const [promptRange, setPromptRange] = useState<CostRange>(30);
 
   const dailyCosts = history?.dailyCosts ?? [];
   const repos = history?.repos ?? [];
   const filteredCosts = costRange === 0 ? dailyCosts : dailyCosts.slice(-costRange);
+
+  const dailyPrompts = extended?.dailyPrompts ?? [];
+  const filteredPrompts = promptRange === 0 ? dailyPrompts : dailyPrompts.slice(-promptRange);
 
   const cumulativeCosts = useMemo(() => {
     let running = 0;
@@ -55,20 +59,11 @@ export default function History({ history, usage }: { history: any; usage: any }
       {/* Header stats */}
       <div className="card full">
         <div className="metrics">
+          <MiniMetric value={formatNumber(extended?.total ?? 0)} label="total prompts" />
+          <MiniMetric value={String(extended?.daysActive ?? 0)} label="days active" />
+          <MiniMetric value={formatNumber(history?.totalSessions ?? 0)} label="sessions indexed" />
           <div className="metric">
-            <div className="metric-value">{formatNumber(history.totalSessions)}</div>
-            <div className="metric-label">total sessions</div>
-          </div>
-          <div className="metric">
-            <div className="metric-value cost">${formatNumber(history.totalCost)}</div>
-            <div className="metric-label">api value</div>
-          </div>
-          <div className="metric">
-            <div className="metric-value">{dailyCosts.length}</div>
-            <div className="metric-label">days tracked</div>
-          </div>
-          <div className="metric">
-            <div className="metric-value">${dailyCosts.length > 0 ? (history.totalCost / dailyCosts.length).toFixed(0) : 0}</div>
+            <div className="metric-value cost">${formatNumber(history?.totalCost ?? 0)}</div>
             <div className="metric-label">avg/day</div>
           </div>
         </div>
@@ -114,6 +109,47 @@ export default function History({ history, usage }: { history: any; usage: any }
         </div>
       )}
 
+      {/* Prompt history (from history.jsonl — goes back months) */}
+      {filteredPrompts.length > 1 && (
+        <div className="card full">
+          <div className="chart-header">
+            <h2>// daily prompts {extended?.firstDate && <span className="dim" style={{ fontWeight: 400, fontSize: 10 }}>(since {extended.firstDate})</span>}</h2>
+            <div className="chart-tabs">
+              {([30, 90, 0] as CostRange[]).map((r) => (
+                <button key={r} className={`chart-tab ${promptRange === r ? "active" : ""}`} onClick={() => setPromptRange(r)}>
+                  {r === 0 ? "all" : r + "d"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <BarChart
+            data={filteredPrompts.map((d: any) => d.count)}
+            labels={filteredPrompts.map((d: any) => d.date)}
+            height={180}
+            color="var(--blue)"
+            valueFormatter={(n: number) => n + " prompts"}
+          />
+          <div className="chart-block-footer" style={{ marginTop: 8 }}>
+            <span>avg: {filteredPrompts.length > 0 ? Math.round(filteredPrompts.reduce((s: number, d: any) => s + d.count, 0) / filteredPrompts.length) : 0}/day</span>
+            <span>total: {formatNumber(filteredPrompts.reduce((s: number, d: any) => s + d.count, 0))}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Monthly breakdown */}
+      {extended?.monthlyPrompts?.length > 1 && (
+        <div className="card full">
+          <h2>// monthly prompts</h2>
+          <BarChart
+            data={extended.monthlyPrompts.map((d: any) => d.count)}
+            labels={extended.monthlyPrompts.map((d: any) => d.month)}
+            height={160}
+            color="var(--blue)"
+            valueFormatter={(n: number) => formatNumber(n) + " prompts"}
+          />
+        </div>
+      )}
+
       {/* Model breakdown + hour heatmap */}
       <div className="grid">
         {usage?.models?.length > 0 && (
@@ -137,7 +173,9 @@ export default function History({ history, usage }: { history: any; usage: any }
 
         <div className="card">
           <h2>// peak hours</h2>
-          {usage?.hourCounts && Object.keys(usage.hourCounts).length > 0 ? (
+          {(extended?.hourly && Object.keys(extended.hourly).length > 0) ? (
+            <HourHeatmap data={extended.hourly} />
+          ) : usage?.hourCounts && Object.keys(usage.hourCounts).length > 0 ? (
             <HourHeatmap data={usage.hourCounts} />
           ) : (
             <div className="empty">no hour data</div>

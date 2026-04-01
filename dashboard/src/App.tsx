@@ -14,6 +14,7 @@ export default function App() {
   const [claudeUsage, setClaudeUsage] = useState<any>(null);
   const [sessions, setSessions] = useState<any>(null);
   const [history, setHistory] = useState<any>(null);
+  const [extended, setExtended] = useState<any>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [rotating, setRotating] = useState(false);
 
@@ -33,9 +34,9 @@ export default function App() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [s, a, u, sess, hist] = await Promise.all([
+      const [s, a, u, sess, hist, ext] = await Promise.all([
         fetch("/api/status"), fetch("/api/auth"), fetch("/api/usage"),
-        fetch("/api/sessions"), fetch("/api/history"),
+        fetch("/api/sessions"), fetch("/api/history"), fetch("/api/history-extended"),
       ]);
       setStatus(await s.json());
       setAuth(await a.json());
@@ -43,6 +44,8 @@ export default function App() {
       setSessions(await sess.json());
       const h = await hist.json();
       if (!h.error) setHistory(h);
+      const e = await ext.json();
+      if (!e.error) setExtended(e);
     } catch {}
     try {
       const r = await fetch("/api/claude-usage");
@@ -100,7 +103,7 @@ export default function App() {
             onMonitor={handleMonitor} rotating={rotating}
           />
         )}
-        {page === "history" && <History history={history} usage={usage} />}
+        {page === "history" && <History history={history} usage={usage} extended={extended} />}
       </main>
     </div>
   );

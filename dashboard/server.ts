@@ -723,6 +723,70 @@ app.get("/api/history", (_: Request, response: Response) => {
   });
 });
 
+// Extended history from history.jsonl (goes back months)
+const historyJsonlPath = join(homedir(), ".claude", "history.jsonl");
+
+app.get("/api/history-extended", (_: Request, response: Response) => {
+  if (!existsSync(historyJsonlPath)) {
+    response.json({ error: "no history.jsonl" });
+    return;
+  }
+
+  const content = readFileSync(historyJsonlPath, "utf8");
+  const daily: Record<string, number> = {};
+  const monthly: Record<string, number> = {};
+  const repos: Record<string, number> = {};
+  const hourly: Record<number, number> = {};
+  let total = 0;
+  let firstDate = "";
+  let lastDate = "";
+
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (!entry.timestamp) continue;
+      const date = new Date(entry.timestamp);
+      const day = date.toISOString().slice(0, 10);
+      const month = day.slice(0, 7);
+      const hour = date.getHours();
+      const repo = (entry.project || "").split("/").pop() || "other";
+
+      daily[day] = (daily[day] || 0) + 1;
+      monthly[month] = (monthly[month] || 0) + 1;
+      repos[repo] = (repos[repo] || 0) + 1;
+      hourly[hour] = (hourly[hour] || 0) + 1;
+      total++;
+
+      if (!firstDate || day < firstDate) firstDate = day;
+      if (!lastDate || day > lastDate) lastDate = day;
+    } catch {}
+  }
+
+  const dailyPrompts = Object.entries(daily)
+    .map(([date, count]) => ({ date, count }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const monthlyPrompts = Object.entries(monthly)
+    .map(([month, count]) => ({ month, count }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+
+  const topRepos = Object.entries(repos)
+    .map(([repo, count]) => ({ repo, count }))
+    .sort((a, b) => b.count - a.count);
+
+  response.json({
+    total,
+    firstDate,
+    lastDate,
+    daysActive: Object.keys(daily).length,
+    dailyPrompts,
+    monthlyPrompts,
+    topRepos,
+    hourly,
+  });
+});
+
 app.get("/api/auth", (_: Request, response: Response) => {
   execFile("claude", ["auth", "status"], { timeout: 5000 }, (error, stdout) => {
     if (error) {

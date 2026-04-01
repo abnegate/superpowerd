@@ -321,7 +321,7 @@ export function AreaChart({
 
   if (data.length < 2) return <div className="sparkline-empty">no data</div>;
   const max = Math.max(...data, 1);
-  const width = 500;
+  const width = 1000;
   const padding = 6;
   const step = (width - padding * 2) / (data.length - 1);
 
@@ -381,7 +381,7 @@ export function AreaChart({
         preserveAspectRatio="none"
         onMouseMove={handleMouse}
         onMouseLeave={() => setTooltip((t) => ({ ...t, visible: false }))}
-        style={{ height }}
+        style={{ width: "100%", height }}
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">

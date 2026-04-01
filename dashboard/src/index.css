@@ -190,6 +190,8 @@ button.danger:hover { background: rgba(255, 68, 68, 0.1); }
 }
 .bar-chart-container { position: relative; }
 .bar-chart-svg { width: 100%; display: block; }
+.area-chart-container { position: relative; }
+.area-chart-svg { width: 100%; display: block; }
 .bar-group { cursor: pointer; }
 .bar-chart-tooltip {
   position: absolute; padding: 4px 8px; background: var(--surface); border: 1px solid var(--border-bright);
