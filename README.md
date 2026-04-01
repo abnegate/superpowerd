@@ -2,6 +2,10 @@
 
 Multi-account Claude Code workspace manager. Automatic rate limit detection, seamless account rotation, WezTerm multi-repo pane grid, and a real-time web dashboard. Works on macOS and Linux.
 
+![Overview](screenshots/overview.png)
+
+![History](screenshots/history.png)
+
 ## The problem
 
 Claude Code's Max plan has usage limits. When you hit them, you wait. If you have multiple accounts, you can rotate between them — but doing it manually means logging out of claude.ai, switching Google accounts, re-authenticating the CLI, and repeating across every terminal. Superpowerd automates all of that.
@@ -14,7 +18,7 @@ Claude Code's Max plan has usage limits. When you hit them, you wait. If you hav
 
 **WezTerm workspace** — Reads `repos.conf` and opens a 2-column grid of terminal panes, one per repo, each running Claude Code. Pane titles show `repo · branch * · PR #123` in real-time. Global shortcuts let you jump to any pane, open/create PRs, or restart Claude.
 
-**Dashboard** — React/TypeScript web UI at `localhost:3848`. Shows which account is active, CLI auth status, monitor state, and a live-streaming log viewer. One-click rotation and monitor start/stop controls.
+**Dashboard** — React/TypeScript web UI at `localhost:3848` with two pages. **Overview** shows active sessions, messages, tokens, tool calls, 429 count, token TTL, account list with one-click rotation, CLI auth with lifetime stats, pool utilization bars, per-session cost breakdown by repo, activity sparklines, and a filterable live log stream. **History** shows daily cost and cumulative cost charts, daily and monthly prompt counts, a day-by-hour activity heatmap, cost by model and repo breakdowns, tool usage rankings, and streak/record stats.
 
 **OAuth recovery** — A custom Claude Code slash command (`/auto-updater`) that walks through diagnosis and repair when the auth flow breaks.
 
@@ -117,12 +121,26 @@ When a signal is detected, `sp-rotate` runs with a 5-minute cooldown between rot
 sp-dashboard    # http://localhost:3848
 ```
 
-The dashboard shows:
-- All accounts with active indicator
-- CLI auth status (email, plan, org)
-- Monitor running/stopped state with start/stop buttons
-- "Rotate Next" button and per-account "Switch" buttons
-- Live log stream via Server-Sent Events (last 100 lines on connect, then real-time tail)
+**Overview** page:
+- Metrics bar: active sessions, messages, tokens, tool calls, 429 count, token TTL
+- Account list with active indicator, per-account "Switch" buttons, and "Rotate Next"
+- CLI auth status: email, plan, org, and lifetime totals (sessions, messages, cost)
+- Pool utilization: 5-hour and 7-day usage bars per account with reset countdown
+- Active sessions table: per-session cost breakdown by repo, messages, output tokens, cache
+- Activity sparklines: 7/14/30-day message and token trends
+- Monitor start/stop controls
+- Live log stream via SSE with filters (all, rotations, limits, errors)
+
+**History** page:
+- Daily cost bar chart (14/30/90/all day ranges) with average and total
+- Cumulative cost area chart
+- Daily and monthly prompt counts
+- Day-by-hour activity heatmap spanning all recorded history
+- Cost by model table with output tokens, cache reads, and cost columns
+- Top 15 tool usage breakdown
+- Cost by repo horizontal bar chart and detailed repo table
+- Records: longest session, duration, speculation savings
+- Streak stats: current and longest active-day streaks
 
 For development, run the Vite dev server and API server separately:
 
@@ -204,32 +222,54 @@ superpowerd/
 │   │                                  Tails ~/.claude/debug/*.txt
 │   │                                  5-minute cooldown between rotations
 │   │                                  Auto-follows new debug log files
-│   └── browser-auth.js              # Browser automation (Playwright)
-│                                      Auto-imports Firefox/Chrome cookies
-│                                      Chrome Keychain decryption on macOS
-│                                      OAuth URL interceptor via BROWSER env var
+│   ├── browser-auth.js              # Browser automation (Playwright)
+│   │                                  Auto-imports Firefox/Chrome cookies
+│   │                                  Chrome Keychain decryption on macOS
+│   │                                  OAuth URL interceptor via BROWSER env var
+│   ├── tokens.js                    # OAuth token caching and org mapping
+│   ├── index-sessions.js            # Maps Claude sessions to repos and costs
+│   └── capture-hook                 # Shell hook for session event capture
 │
 ├── dashboard/
 │   ├── server.ts                    # Express API server
-│   │                                  GET  /api/status    — accounts, current, monitor
-│   │                                  GET  /api/auth      — claude auth status
-│   │                                  POST /api/rotate    — trigger rotation
-│   │                                  POST /api/monitor/* — start/stop
-│   │                                  GET  /api/logs      — SSE log stream
+│   │                                  GET  /api/status       — accounts, current, monitor
+│   │                                  GET  /api/auth         — claude auth status
+│   │                                  GET  /api/usage        — today's stats, totals, token expiry
+│   │                                  GET  /api/claude-usage — pool utilization per account
+│   │                                  GET  /api/sessions     — active sessions with cost
+│   │                                  GET  /api/history      — daily costs, per-repo breakdown
+│   │                                  GET  /api/history-extended — prompts, heatmap, streaks
+│   │                                  GET  /api/tools        — top tool usage
+│   │                                  POST /api/rotate       — trigger rotation
+│   │                                  POST /api/monitor/*    — start/stop
+│   │                                  GET  /api/logs         — SSE log stream
 │   ├── vite.config.ts               # Vite + React + proxy
 │   ├── tsconfig.json
 │   ├── src/
 │   │   ├── main.tsx
-│   │   ├── App.tsx                  # Dashboard UI (React 19)
-│   │   └── index.css                # Dark theme matching WezTerm
+│   │   ├── App.tsx                  # Router + state management (React 19)
+│   │   ├── index.css                # Dark theme matching WezTerm
+│   │   ├── pages/
+│   │   │   ├── Overview.tsx         # Accounts, auth, sessions, activity, logs
+│   │   │   └── History.tsx          # Cost charts, heatmap, tool usage, repos
+│   │   └── components/
+│   │       ├── Sidebar.tsx          # Navigation with status indicator
+│   │       ├── Charts.tsx           # Sparkline, BarChart, AreaChart, tooltips
+│   │       └── UsageBar.tsx         # Pool utilization bar with countdown
 │   └── dist/                        # Built assets (served by Express)
 │
 ├── commands/
 │   └── auto-updater.md              # Claude Code slash command
 │                                      OAuth diagnosis + recovery procedures
 │
+├── screenshots/                     # Dashboard screenshots for README
+│
 └── data/                            # Runtime state (gitignored)
     ├── state.json                   # Current account index + timestamp
+    ├── session-index.json           # Session-to-repo cost mapping
+    ├── tokens.json                  # OAuth tokens per account
+    ├── usage-history.json           # Usage burn rate tracking
+    ├── usage-snapshots.json         # Last-known usage per account
     ├── monitor.pid                  # Daemon PID
     ├── monitor.log                  # Monitor log
     ├── rotate.log                   # Rotation log
