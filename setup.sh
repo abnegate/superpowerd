@@ -148,6 +148,11 @@ cd "$PROJECT_DIR/dashboard"
 npm install --silent 2>/dev/null
 npm run build 2>/dev/null || echo "    (build skipped, run npm run build later)"
 
+# Index historical sessions
+echo "==> Session index"
+cd "$PROJECT_DIR"
+node rotation/index-sessions.js 2>/dev/null || echo "    (indexing skipped)"
+
 # Install custom slash commands
 echo "==> Claude commands"
 COMMANDS_DIR="$HOME/.claude/commands"
