@@ -1,9 +1,39 @@
 import { useState, useMemo } from "react";
-import { formatNumber, formatCurrency, BarChart, AreaChart } from "../components/Charts";
+import { formatNumber, formatCurrency, BarChart, AreaChart, Sparkline, MiniMetric } from "../components/Charts";
 
 type CostRange = 14 | 30 | 90 | 0;
 
-export default function History({ history }: { history: any }) {
+function HourHeatmap({ data }: { data: Record<string, number> }) {
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const max = Math.max(...Object.values(data), 1);
+  return (
+    <div style={{ display: "flex", gap: 2, alignItems: "flex-end", height: 60 }}>
+      {hours.map((h) => {
+        const count = data[String(h)] || 0;
+        const pct = count / max;
+        const label = h === 0 ? "12a" : h < 12 ? h + "a" : h === 12 ? "12p" : (h - 12) + "p";
+        return (
+          <div key={h} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+            <div
+              style={{
+                width: "100%",
+                height: Math.max(pct * 48, 2),
+                background: pct > 0.7 ? "var(--bright-green)" : pct > 0.3 ? "var(--green)" : "var(--border-bright)",
+                transition: "height 0.3s",
+              }}
+              title={`${label}: ${count} sessions`}
+            />
+            {h % 3 === 0 && (
+              <span style={{ fontSize: 9, color: "var(--muted)", fontFamily: "var(--mono)" }}>{label}</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export default function History({ history, usage }: { history: any; usage: any }) {
   const [costRange, setCostRange] = useState<CostRange>(30);
 
   const dailyCosts = history?.dailyCosts ?? [];
@@ -83,6 +113,60 @@ export default function History({ history }: { history: any }) {
           />
         </div>
       )}
+
+      {/* Model breakdown + hour heatmap */}
+      <div className="grid">
+        {usage?.models?.length > 0 && (
+          <div className="card">
+            <h2>// cost by model</h2>
+            <table className="sessions-table">
+              <thead><tr><th>model</th><th>output</th><th>cache</th><th>cost</th></tr></thead>
+              <tbody>
+                {usage.models.map((m: any) => (
+                  <tr key={m.model}>
+                    <td className="session-repo">{m.model}</td>
+                    <td>{formatNumber(m.output)}</td>
+                    <td>{formatNumber(m.cacheRead)}</td>
+                    <td className="session-cost">{formatCurrency(m.cost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="card">
+          <h2>// peak hours</h2>
+          {usage?.hourCounts && Object.keys(usage.hourCounts).length > 0 ? (
+            <HourHeatmap data={usage.hourCounts} />
+          ) : (
+            <div className="empty">no hour data</div>
+          )}
+          {usage?.longestSession && (
+            <>
+              <div style={{ marginTop: 20 }}>
+                <h2>// records</h2>
+              </div>
+              <div className="auth-info">
+                <div className="auth-row">
+                  <span className="key">longest session</span>
+                  <span className="value">{formatNumber(usage.longestSession.messageCount)} msgs</span>
+                </div>
+                <div className="auth-row">
+                  <span className="key">duration</span>
+                  <span className="value">{Math.round((usage.longestSession.duration || 0) / 3600000)}h</span>
+                </div>
+                {usage.speculationSaved > 0 && (
+                  <div className="auth-row">
+                    <span className="key">speculation saved</span>
+                    <span className="value">{Math.round(usage.speculationSaved / 1000)}s</span>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
 
       {/* Per-repo breakdown */}
       {repos.length > 0 && (

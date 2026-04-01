@@ -189,6 +189,10 @@ app.get("/api/usage", (_: Request, response: Response) => {
   let totalCost = 0;
   let totalMessages = 0;
   let totalSessions = 0;
+  let models: Array<{ model: string; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number }> = [];
+  let hourCounts: Record<string, number> = {};
+  let longestSession: any = null;
+  let speculationSaved = 0;
   const dailyActivity: Array<{ date: string; messages: number; tokens: number; tools: number }> = [];
 
   try {
@@ -248,6 +252,30 @@ app.get("/api/usage", (_: Request, response: Response) => {
       todayTools = latest.toolCallCount || 0;
       todayTokens = tokensByDate[latest.date] || 0;
     }
+
+    hourCounts = stats.hourCounts || {};
+    longestSession = stats.longestSession || null;
+    speculationSaved = stats.totalSpeculationTimeSavedMs || 0;
+
+    // Per-model breakdown (inside try — stats is scoped here)
+    if (stats.modelUsage) {
+      for (const [model, u] of Object.entries(stats.modelUsage) as Array<[string, Record<string, number>]>) {
+        const rates = pricing[model] || fallbackPricing;
+        const cost = ((u.inputTokens || 0) / 1e6) * rates.input
+          + ((u.outputTokens || 0) / 1e6) * rates.output
+          + ((u.cacheReadInputTokens || 0) / 1e6) * rates.cacheRead
+          + ((u.cacheCreationInputTokens || 0) / 1e6) * rates.cacheWrite;
+        models.push({
+          model: model.replace("claude-", "").replace(/-\d{8}$/, ""),
+          input: u.inputTokens || 0,
+          output: u.outputTokens || 0,
+          cacheRead: u.cacheReadInputTokens || 0,
+          cacheWrite: u.cacheCreationInputTokens || 0,
+          cost: Math.round(cost * 100) / 100,
+        });
+      }
+      models.sort((a, b) => b.cost - a.cost);
+    }
   } catch {}
 
   // Today's rate limit signals from debug logs
@@ -301,6 +329,10 @@ app.get("/api/usage", (_: Request, response: Response) => {
     },
     tokenExpiry,
     dailyActivity,
+    models,
+    hourCounts,
+    longestSession,
+    speculationSaved,
   });
 });
 

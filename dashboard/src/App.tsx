@@ -100,7 +100,7 @@ export default function App() {
             onMonitor={handleMonitor} rotating={rotating}
           />
         )}
-        {page === "history" && <History history={history} />}
+        {page === "history" && <History history={history} usage={usage} />}
       </main>
     </div>
   );
