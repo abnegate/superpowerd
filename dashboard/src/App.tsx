@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import Sidebar from "./components/Sidebar";
 import Overview from "./pages/Overview";
 import History from "./pages/History";
+import Insights from "./pages/Insights";
 
 export default function App() {
   const [page, setPage] = useState(() => {
@@ -27,7 +28,7 @@ export default function App() {
   useEffect(() => {
     const handler = () => {
       const hash = window.location.hash.replace("#/", "").replace("#", "");
-      setPage(hash === "history" ? "history" : "overview");
+      setPage(["history", "insights"].includes(hash) ? hash : "overview");
     };
     window.addEventListener("hashchange", handler);
     return () => window.removeEventListener("hashchange", handler);
@@ -107,6 +108,7 @@ export default function App() {
           />
         )}
         {page === "history" && <History history={history} usage={usage} extended={extended} tools={tools} />}
+        {page === "insights" && <Insights extended={extended} usage={usage} tools={tools} history={history} />}
       </main>
     </div>
   );

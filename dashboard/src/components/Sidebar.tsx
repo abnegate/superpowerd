@@ -10,7 +10,12 @@ const icons = {
       <polyline points="1,12 4,6 7,9 10,3 14,7" /><line x1="1" y1="14" x2="14" y2="14" />
     </svg>
   ),
-};
+  insights: (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <circle cx="8" cy="8" r="6" /><path d="M8 4v4l3 2" />
+    </svg>
+  ),
+} as Record<string, JSX.Element>;
 
 export default function Sidebar({ page, onNavigate, monitorRunning }: {
   page: string;
@@ -23,7 +28,7 @@ export default function Sidebar({ page, onNavigate, monitorRunning }: {
         <div className="sidebar-logo">super<span>powerd</span></div>
       </div>
       <nav className="sidebar-nav">
-        {(["overview", "history"] as const).map((item) => (
+        {(["overview", "history", "insights"] as const).map((item) => (
           <button
             key={item}
             className={`sidebar-item ${page === item ? "active" : ""}`}
