@@ -11,6 +11,16 @@ export function formatCurrency(n: number): string {
   return "$" + n.toFixed(2);
 }
 
+function toLocalTime(utc: string): string {
+  try {
+    const date = new Date(utc.includes("T") ? utc : utc + "Z");
+    if (isNaN(date.getTime())) return utc;
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch {
+    return utc;
+  }
+}
+
 export function formatLogLine(line: string): ReactNode {
   const match = line.match(/^\[([^\]]+)\]\s*(.*)/);
   if (!match) return <span>{line}</span>;
@@ -21,7 +31,7 @@ export function formatLogLine(line: string): ReactNode {
   else if (rest.includes("Now using") || rest.includes("===")) className = "success";
   return (
     <>
-      <span className="timestamp">{timestamp}</span>{" "}
+      <span className="timestamp">{toLocalTime(timestamp)}</span>{" "}
       <span className={className}>{rest}</span>
     </>
   );
