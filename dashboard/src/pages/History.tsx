@@ -6,29 +6,57 @@ type CostRange = 14 | 30 | 90 | 0;
 function HourHeatmap({ data }: { data: Record<string, number> }) {
   const hours = Array.from({ length: 24 }, (_, i) => i);
   const max = Math.max(...Object.values(data), 1);
+  const days = ["", "Mon", "", "Wed", "", "Fri", ""];
+  // Lay out as 7 rows x 24 cols (GitHub contribution style but for hours)
+  // Since we only have hour totals (not day-of-week), show as 4 rows x 6 cols
+  const rows = [
+    hours.slice(0, 6),   // 12a-5a
+    hours.slice(6, 12),  // 6a-11a
+    hours.slice(12, 18), // 12p-5p
+    hours.slice(18, 24), // 6p-11p
+  ];
+  const rowLabels = ["night", "morning", "afternoon", "evening"];
+
   return (
-    <div style={{ display: "flex", gap: 2, alignItems: "flex-end", height: 60 }}>
-      {hours.map((h) => {
-        const count = data[String(h)] || 0;
-        const pct = count / max;
-        const label = h === 0 ? "12a" : h < 12 ? h + "a" : h === 12 ? "12p" : (h - 12) + "p";
-        return (
-          <div key={h} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-            <div
-              style={{
-                width: "100%",
-                height: Math.max(pct * 48, 2),
-                background: pct > 0.7 ? "var(--bright-green)" : pct > 0.3 ? "var(--green)" : "var(--border-bright)",
-                transition: "height 0.3s",
-              }}
-              title={`${label}: ${count} sessions`}
-            />
-            {h % 3 === 0 && (
-              <span style={{ fontSize: 9, color: "var(--muted)", fontFamily: "var(--mono)" }}>{label}</span>
-            )}
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "60px 1fr", gap: 4 }}>
+        {rows.map((row, ri) => (
+          <div key={ri} style={{ display: "contents" }}>
+            <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", display: "flex", alignItems: "center" }}>
+              {rowLabels[ri]}
+            </div>
+            <div style={{ display: "flex", gap: 3 }}>
+              {row.map((h) => {
+                const count = data[String(h)] || 0;
+                const intensity = count / max;
+                const bg = count === 0 ? "var(--border)"
+                  : intensity < 0.25 ? "rgba(65, 168, 62, 0.25)"
+                  : intensity < 0.5 ? "rgba(65, 168, 62, 0.5)"
+                  : intensity < 0.75 ? "rgba(115, 218, 112, 0.7)"
+                  : "var(--bright-green)";
+                const label = h === 0 ? "12a" : h < 12 ? h + "a" : h === 12 ? "12p" : (h - 12) + "p";
+                return (
+                  <div
+                    key={h}
+                    title={`${label}: ${count} sessions`}
+                    style={{
+                      flex: 1,
+                      aspectRatio: "1",
+                      background: bg,
+                      minHeight: 24,
+                    }}
+                  />
+                );
+              })}
+            </div>
           </div>
-        );
-      })}
+        ))}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, paddingLeft: 64 }}>
+        {["12a", "6a", "12p", "6p"].map((l) => (
+          <span key={l} style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--muted)" }}>{l}</span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -126,7 +154,7 @@ export default function History({ history, usage, extended }: { history: any; us
             data={filteredPrompts.map((d: any) => d.count)}
             labels={filteredPrompts.map((d: any) => d.date)}
             height={180}
-            color="var(--blue)"
+            color="var(--green)"
             valueFormatter={(n: number) => n + " prompts"}
           />
           <div className="chart-block-footer" style={{ marginTop: 8 }}>
@@ -144,7 +172,7 @@ export default function History({ history, usage, extended }: { history: any; us
             data={extended.monthlyPrompts.map((d: any) => d.count)}
             labels={extended.monthlyPrompts.map((d: any) => d.month)}
             height={160}
-            color="var(--blue)"
+            color="var(--green)"
             valueFormatter={(n: number) => formatNumber(n) + " prompts"}
           />
         </div>
