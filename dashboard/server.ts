@@ -775,6 +775,29 @@ app.get("/api/history-extended", (_: Request, response: Response) => {
     .map(([repo, count]) => ({ repo, count }))
     .sort((a, b) => b.count - a.count);
 
+  // Day x hour grid for heatmap
+  const heatmap: Record<string, Record<number, number>> = {};
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (!entry.timestamp) continue;
+      const date = new Date(entry.timestamp);
+      const day = date.toISOString().slice(0, 10);
+      const hour = date.getHours();
+      if (!heatmap[day]) heatmap[day] = {};
+      heatmap[day][hour] = (heatmap[day][hour] || 0) + 1;
+    } catch {}
+  }
+
+  // Convert to flat array for the frontend: [{date, hour, count}, ...]
+  const heatmapData: Array<{ date: string; hour: number; count: number }> = [];
+  for (const [date, hours] of Object.entries(heatmap)) {
+    for (let h = 0; h < 24; h++) {
+      if (hours[h]) heatmapData.push({ date, hour: h, count: hours[h] });
+    }
+  }
+
   response.json({
     total,
     firstDate,
@@ -784,6 +807,7 @@ app.get("/api/history-extended", (_: Request, response: Response) => {
     monthlyPrompts,
     topRepos,
     hourly,
+    heatmapData,
   });
 });
 
