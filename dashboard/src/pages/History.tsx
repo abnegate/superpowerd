@@ -5,56 +5,34 @@ type CostRange = 14 | 30 | 90 | 0;
 
 function HourHeatmap({ data }: { data: Record<string, number> }) {
   const hours = Array.from({ length: 24 }, (_, i) => i);
-  const max = Math.max(...Object.values(data), 1);
-  const days = ["", "Mon", "", "Wed", "", "Fri", ""];
-  // Lay out as 7 rows x 24 cols (GitHub contribution style but for hours)
-  // Since we only have hour totals (not day-of-week), show as 4 rows x 6 cols
-  const rows = [
-    hours.slice(0, 6),   // 12a-5a
-    hours.slice(6, 12),  // 6a-11a
-    hours.slice(12, 18), // 12p-5p
-    hours.slice(18, 24), // 6p-11p
-  ];
-  const rowLabels = ["night", "morning", "afternoon", "evening"];
+  const max = Math.max(...hours.map((h) => data[String(h)] || 0), 1);
 
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "60px 1fr", gap: 4 }}>
-        {rows.map((row, ri) => (
-          <div key={ri} style={{ display: "contents" }}>
-            <div style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", display: "flex", alignItems: "center" }}>
-              {rowLabels[ri]}
-            </div>
-            <div style={{ display: "flex", gap: 3 }}>
-              {row.map((h) => {
-                const count = data[String(h)] || 0;
-                const intensity = count / max;
-                const bg = count === 0 ? "var(--border)"
-                  : intensity < 0.25 ? "rgba(65, 168, 62, 0.25)"
-                  : intensity < 0.5 ? "rgba(65, 168, 62, 0.5)"
-                  : intensity < 0.75 ? "rgba(115, 218, 112, 0.7)"
-                  : "var(--bright-green)";
-                const label = h === 0 ? "12a" : h < 12 ? h + "a" : h === 12 ? "12p" : (h - 12) + "p";
-                return (
-                  <div
-                    key={h}
-                    title={`${label}: ${count} sessions`}
-                    style={{
-                      flex: 1,
-                      aspectRatio: "1",
-                      background: bg,
-                      minHeight: 24,
-                    }}
-                  />
-                );
-              })}
-            </div>
-          </div>
-        ))}
+      <div style={{ display: "flex", gap: 2 }}>
+        {hours.map((h) => {
+          const count = data[String(h)] || 0;
+          const intensity = count / max;
+          const bg = count === 0 ? "var(--border)"
+            : intensity < 0.2 ? "rgba(65, 168, 62, 0.2)"
+            : intensity < 0.4 ? "rgba(65, 168, 62, 0.4)"
+            : intensity < 0.6 ? "rgba(65, 168, 62, 0.6)"
+            : intensity < 0.8 ? "rgba(115, 218, 112, 0.8)"
+            : "var(--bright-green)";
+          return (
+            <div
+              key={h}
+              title={`${h}:00 — ${count} prompts`}
+              style={{ flex: 1, height: 32, background: bg }}
+            />
+          );
+        })}
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, paddingLeft: 64 }}>
-        {["12a", "6a", "12p", "6p"].map((l) => (
-          <span key={l} style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--muted)" }}>{l}</span>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+        {[0, 3, 6, 9, 12, 15, 18, 21].map((h) => (
+          <span key={h} style={{ fontFamily: "var(--mono)", fontSize: 9, color: "var(--muted)" }}>
+            {h === 0 ? "12a" : h < 12 ? h + "a" : h === 12 ? "12p" : (h - 12) + "p"}
+          </span>
         ))}
       </div>
     </div>
