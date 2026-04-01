@@ -111,7 +111,7 @@ function ActivityHeatmap({ data }: { data: Array<{ date: string; hour: number; c
   );
 }
 
-export default function History({ history, usage, extended }: { history: any; usage: any; extended: any }) {
+export default function History({ history, usage, extended, tools }: { history: any; usage: any; extended: any; tools: any }) {
   const [costRange, setCostRange] = useState<CostRange>(30);
   const [promptRange, setPromptRange] = useState<CostRange>(30);
 
@@ -139,7 +139,8 @@ export default function History({ history, usage, extended }: { history: any; us
         <div className="metrics">
           <MiniMetric value={formatNumber(extended?.total ?? 0)} label="total prompts" />
           <MiniMetric value={String(extended?.daysActive ?? 0)} label="days active" />
-          <MiniMetric value={formatNumber(history?.totalSessions ?? 0)} label="sessions indexed" />
+          <MiniMetric value={String(extended?.streaks?.current ?? 0)} label="current streak" unit="d" />
+          <MiniMetric value={String(extended?.streaks?.longest ?? 0)} label="longest streak" unit="d" />
           <div className="metric">
             <div className="metric-value cost">${formatNumber(history?.totalCost ?? 0)}</div>
             <div className="metric-label">avg/day</div>
@@ -277,6 +278,20 @@ export default function History({ history, usage, extended }: { history: any; us
           </div>
         )}
       </div>
+
+      {/* Tool usage */}
+      {tools?.tools?.length > 0 && (
+        <div className="card full">
+          <h2>// tool usage ({formatNumber(tools.tools.reduce((s: number, t: any) => s + t.count, 0))} total calls)</h2>
+          <BarChart
+            data={tools.tools.slice(0, 15).map((t: any) => t.count)}
+            labels={tools.tools.slice(0, 15).map((t: any) => t.tool)}
+            horizontal
+            height={tools.tools.slice(0, 15).length * 32}
+            valueFormatter={(n: number) => formatNumber(n)}
+          />
+        </div>
+      )}
 
       {/* Per-repo breakdown */}
       {repos.length > 0 && (

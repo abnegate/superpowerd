@@ -723,6 +723,48 @@ app.get("/api/history", (_: Request, response: Response) => {
   });
 });
 
+// Tool usage breakdown from session index
+app.get("/api/tools", (_: Request, response: Response) => {
+  const tools: Record<string, number> = {};
+  let filesScanned = 0;
+
+  try {
+    const projectDirs = readdirSync(join(homedir(), ".claude", "projects"));
+    for (const dir of projectDirs) {
+      const fullDir = join(homedir(), ".claude", "projects", dir);
+      let files: string[];
+      try { files = readdirSync(fullDir); } catch { continue; }
+
+      for (const file of files) {
+        if (!file.endsWith(".jsonl")) continue;
+        const filepath = join(fullDir, file);
+        try {
+          const stat = statSync(filepath);
+          // Only scan files modified in last 60 days and under 50MB
+          if (Date.now() - stat.mtimeMs > 60 * 86400000 || stat.size > 50_000_000) continue;
+
+          const content = readFileSync(filepath, "utf8");
+          for (const line of content.split("\n")) {
+            if (!line.includes('"tool_use"')) continue;
+            // Extract tool name from: "type":"tool_use","id":"...","name":"Bash"
+            const match = line.match(/"type":"tool_use"[^}]*"name":"([^"]+)"/);
+            if (match) {
+              tools[match[1]] = (tools[match[1]] || 0) + 1;
+            }
+          }
+          filesScanned++;
+        } catch {}
+      }
+    }
+  } catch {}
+
+  const sorted = Object.entries(tools)
+    .map(([tool, count]) => ({ tool, count }))
+    .sort((a, b) => b.count - a.count);
+
+  response.json({ tools: sorted, filesScanned });
+});
+
 // Extended history from history.jsonl (goes back months)
 const historyJsonlPath = join(homedir(), ".claude", "history.jsonl");
 
@@ -775,6 +817,35 @@ app.get("/api/history-extended", (_: Request, response: Response) => {
     .map(([repo, count]) => ({ repo, count }))
     .sort((a, b) => b.count - a.count);
 
+  // Streaks (consecutive days with activity)
+  const activeDays = new Set(Object.keys(daily));
+  let currentStreak = 0;
+  let longestStreak = 0;
+  let streak = 0;
+  const allDates: string[] = [];
+  if (firstDate && lastDate) {
+    const cursor = new Date(firstDate);
+    const end = new Date(lastDate);
+    while (cursor <= end) {
+      allDates.push(cursor.toISOString().slice(0, 10));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  }
+  for (const date of allDates) {
+    if (activeDays.has(date)) {
+      streak++;
+      if (streak > longestStreak) longestStreak = streak;
+    } else {
+      streak = 0;
+    }
+  }
+  // Current streak (counting back from today)
+  currentStreak = 0;
+  for (let i = allDates.length - 1; i >= 0; i--) {
+    if (activeDays.has(allDates[i])) currentStreak++;
+    else break;
+  }
+
   // Day x hour grid for heatmap
   const heatmap: Record<string, Record<number, number>> = {};
   for (const line of content.split("\n")) {
@@ -808,6 +879,7 @@ app.get("/api/history-extended", (_: Request, response: Response) => {
     topRepos,
     hourly,
     heatmapData,
+    streaks: { current: currentStreak, longest: longestStreak },
   });
 });
 

@@ -15,6 +15,7 @@ export default function App() {
   const [sessions, setSessions] = useState<any>(null);
   const [history, setHistory] = useState<any>(null);
   const [extended, setExtended] = useState<any>(null);
+  const [tools, setTools] = useState<any>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [rotating, setRotating] = useState(false);
 
@@ -46,6 +47,8 @@ export default function App() {
       if (!h.error) setHistory(h);
       const e = await ext.json();
       if (!e.error) setExtended(e);
+      // Tools is slower — fetch separately, cache on server
+      fetch("/api/tools").then(r => r.json()).then(d => { if (d.tools) setTools(d); }).catch(() => {});
     } catch {}
     try {
       const r = await fetch("/api/claude-usage");
@@ -103,7 +106,7 @@ export default function App() {
             onMonitor={handleMonitor} rotating={rotating}
           />
         )}
-        {page === "history" && <History history={history} usage={usage} extended={extended} />}
+        {page === "history" && <History history={history} usage={usage} extended={extended} tools={tools} />}
       </main>
     </div>
   );
