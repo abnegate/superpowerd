@@ -44,6 +44,21 @@ config.initial_rows = 70
 config.pane_focus_follows_mouse = true
 config.audible_bell = "SystemBeep"
 
+config.mouse_bindings = {
+  -- Disable plain click on hyperlinks
+  {
+    event = { Up = { streak = 1, button = "Left" } },
+    mods = "NONE",
+    action = act.CompleteSelection("ClipboardAndPrimarySelection"),
+  },
+  -- Cmd+Click to open hyperlinks
+  {
+    event = { Up = { streak = 1, button = "Left" } },
+    mods = "CMD",
+    action = act.OpenLinkAtMouseCursor,
+  },
+}
+
 config.use_fancy_tab_bar = false
 config.tab_bar_at_bottom = true
 config.hide_tab_bar_if_only_one_tab = false
