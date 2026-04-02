@@ -27,7 +27,7 @@ Claude Code's Max plan has usage limits. When you hit them, you wait. If you hav
 ## Quick start
 
 ```bash
-git clone git@github.com:jakeb994/superpowerd.git ~/Local/superpowerd
+git clone git@github.com:abnegate/superpowerd.git ~/Local/superpowerd
 cd ~/Local/superpowerd
 bash setup.sh
 ```
