@@ -155,6 +155,17 @@ wezterm.on("update-right-status", function(window, pane)
 end)
 
 wezterm.on("gui-startup", function()
+  -- Auto-clone missing repos before opening panes
+  for _, r in ipairs(repos) do
+    local dir = workspace .. "/" .. r.name
+    local check = io.open(dir .. "/.git/HEAD", "r")
+    if check then
+      check:close()
+    else
+      os.execute("gh repo clone " .. r.remote .. " " .. dir .. " 2>/dev/null")
+    end
+  end
+
   local pane_defs = {}
   for _, r in ipairs(repos) do
     table.insert(pane_defs, { name = r.name, cwd = workspace .. "/" .. r.name, claude = true })
