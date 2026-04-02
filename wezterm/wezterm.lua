@@ -53,6 +53,17 @@ config.tab_max_width = 50
 -- Repos from repos.conf (directory=org/repo)
 -- Shortcuts from shortcuts.conf (directory=key)
 
+-- Read preferred AI agent (claude or codex)
+local agent_cmd = "claude --dangerously-skip-permissions"
+local af = io.open(home .. "/.config/superpowerd/agent", "r")
+if af then
+  local agent = af:read("*l")
+  af:close()
+  if agent == "codex" then
+    agent_cmd = "codex --full-auto"
+  end
+end
+
 local repos = {}
 local f = io.open(superpowerd .. "/repos.conf", "r")
   or io.open(workspace .. "/repos.conf", "r")
@@ -209,8 +220,7 @@ wezterm.on("gui-startup", function()
           .. "PR=$(cat /tmp/.superpowerd-pr-$(printf '%s' \"${PWD}:${B}\" | md5 -q) 2>/dev/null); "
           .. "[ -n \"$PR\" ] && T=\"$T · $PR\"; "
           .. "printf '\\033]1;%s\\a' \"$T\"; "
-          .. "done & } 2>/dev/null\n")
-        pane:send_text("claude --dangerously-skip-permissions\n")
+          .. "done & } 2>/dev/null; clear; " .. agent_cmd .. "\n")
       end
     end
   end
@@ -293,7 +303,7 @@ table.insert(config.keys, {
   action = wezterm.action_callback(function(_, pane)
     pane:send_text("\x03")
     wezterm.time.call_after(0.5, function()
-      pane:send_text("claude --dangerously-skip-permissions\n")
+      pane:send_text(agent_cmd .. "\n")
     end)
   end),
 })

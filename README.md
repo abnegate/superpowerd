@@ -27,7 +27,7 @@ Claude Code's Max plan has usage limits. When you hit them, you wait. If you hav
 ## Quick start
 
 ```bash
-git clone git@github.com:jakeb994/superpowerd.git ~/Local/superpowerd
+git clone git@github.com:abnegate/superpowerd.git ~/Local/superpowerd
 cd ~/Local/superpowerd
 bash setup.sh
 ```
@@ -40,7 +40,7 @@ The setup script:
 5. Installs Playwright and its Chromium browser
 6. Builds the dashboard
 7. Symlinks the `/auto-updater` slash command into `~/.claude/commands/`
-8. Adds `sp-rotate`, `sp-monitor`, and `sp-dashboard` aliases to `.zshrc`
+8. Adds `sp-rotate`, `sp-monitor`, `sp-dashboard`, and `sp-agent` aliases to `.zshrc`
 
 After setup, restart WezTerm to activate the pane grid.
 
@@ -116,6 +116,16 @@ The monitor tails `~/.claude/debug/*.txt` for rate limit signals:
 - Automatically switches to the newest debug log when sessions change
 
 When a signal is detected, `sp-rotate` runs with a 5-minute cooldown between rotations. Transient 429s on the `client_data` endpoint (normal startup bursts) are filtered out.
+
+### Agent switching
+
+```bash
+sp-agent          # Show current agent (defaults to claude)
+sp-agent codex    # Switch to Codex CLI
+sp-agent claude   # Switch back to Claude Code
+```
+
+The preference persists in `~/.config/superpowerd/agent` and is read by WezTerm on startup. After switching, restart WezTerm for all panes to launch the new agent. The `Opt+Cmd+R` restart shortcut also respects the current choice.
 
 ### Dashboard
 

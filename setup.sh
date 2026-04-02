@@ -27,6 +27,7 @@ fi
 echo "==> Packages"
 brew install --quiet git gh node 2>/dev/null || true
 brew install --cask --quiet wezterm 2>/dev/null || true
+brew install --cask --quiet font-fira-code-nerd-font 2>/dev/null || true
 brew install --quiet koekeishiya/formulae/skhd 2>/dev/null || true
 
 echo "==> Claude Code"
@@ -111,12 +112,19 @@ export CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1
 alias sp-rotate="$PROJECT_DIR/rotation/rotate"
 alias sp-monitor="$PROJECT_DIR/rotation/monitor"
 alias sp-update="$PROJECT_DIR/rotation/update"
-alias sp-dashboard="node $PROJECT_DIR/dashboard/server.js"
+alias sp-dashboard="npx --yes tsx $PROJECT_DIR/dashboard/server.ts"
+alias sp-agent="$PROJECT_DIR/sp-agent"
 BLOCK
 fi
 
 # Make scripts executable
-chmod +x "$PROJECT_DIR/rotation/rotate" "$PROJECT_DIR/rotation/monitor" "$PROJECT_DIR/rotation/browser-auth.js" "$PROJECT_DIR/rotation/tokens.js" "$PROJECT_DIR/rotation/update"
+chmod +x "$PROJECT_DIR/rotation/rotate" "$PROJECT_DIR/rotation/monitor" "$PROJECT_DIR/rotation/browser-auth.js" "$PROJECT_DIR/rotation/tokens.js" "$PROJECT_DIR/rotation/update" "$PROJECT_DIR/sp-agent"
+
+# Initialize agent preference
+mkdir -p "$HOME/.config/superpowerd"
+if [[ ! -f "$HOME/.config/superpowerd/agent" ]]; then
+  echo "claude" > "$HOME/.config/superpowerd/agent"
+fi
 
 # Initialize data directory
 mkdir -p "$PROJECT_DIR/data"

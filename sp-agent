@@ -1,0 +1,23 @@
+#!/bin/bash
+# Toggle between claude and codex as the default AI agent for WezTerm panes
+
+AGENT_FILE="$HOME/.config/superpowerd/agent"
+mkdir -p "$(dirname "$AGENT_FILE")"
+
+current=$(cat "$AGENT_FILE" 2>/dev/null || echo "claude")
+
+case "${1:-}" in
+  claude|codex)
+    echo "$1" > "$AGENT_FILE"
+    echo "Switched to $1. Restart WezTerm to apply."
+    ;;
+  status|"")
+    echo "Current agent: $current"
+    echo "Usage: sp-agent [claude|codex]"
+    ;;
+  *)
+    echo "Unknown agent: $1"
+    echo "Usage: sp-agent [claude|codex]"
+    exit 1
+    ;;
+esac
