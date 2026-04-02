@@ -345,6 +345,7 @@ for _, binding in ipairs({
   { key = "Backspace",  mods = "CMD",       action = act.SendString("\x15") },
   { key = "LeftArrow",  mods = "OPT|SHIFT", action = act.SendString("\x1b[1;10D") },
   { key = "RightArrow", mods = "OPT|SHIFT", action = act.SendString("\x1b[1;10C") },
+  { key = "Enter",      mods = "SHIFT",     action = act.SendString("\x1b[13;2u") },
 }) do
   table.insert(config.keys, binding)
 end
