@@ -27,6 +27,7 @@ fi
 echo "==> Packages"
 brew install --quiet git gh node 2>/dev/null || true
 brew install --cask --quiet wezterm 2>/dev/null || true
+brew install --cask --quiet font-fira-code-nerd-font 2>/dev/null || true
 brew install --quiet koekeishiya/formulae/skhd 2>/dev/null || true
 
 echo "==> Claude Code"
