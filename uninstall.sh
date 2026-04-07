@@ -37,6 +37,30 @@ else
   systemctl --user daemon-reload 2>/dev/null || true
 fi
 
+# Remove tmux config
+echo "==> Removing tmux config"
+if [[ -f "$HOME/.config/tmux/tmux.conf" ]]; then
+  if grep -q "superpowerd" "$HOME/.config/tmux/tmux.conf" 2>/dev/null; then
+    rm -f "$HOME/.config/tmux/tmux.conf"
+    echo "    Removed tmux.conf"
+  else
+    echo "    Skipped tmux.conf (not ours)"
+  fi
+fi
+
+# Kill tmux sessions
+echo "==> Cleaning tmux sessions"
+if tmux ls &>/dev/null; then
+  echo "    Active tmux sessions found. Kill them? (y/N)"
+  read -r answer
+  if [[ "$answer" =~ ^[Yy]$ ]]; then
+    tmux kill-server 2>/dev/null || true
+    echo "    Killed all tmux sessions"
+  else
+    echo "    Kept tmux sessions running"
+  fi
+fi
+
 # Remove WezTerm config
 echo "==> Removing WezTerm config"
 if [[ -f "$HOME/.config/wezterm/wezterm.lua" ]]; then
@@ -112,7 +136,7 @@ if [[ -f "$ZSHRC" ]] && grep -q "# superpowerd" "$ZSHRC"; then
           inBlock = false;
           continue;
         }
-        if (lines[i].includes('SUPERPOWERD') || lines[i].includes('sp-rotate') || lines[i].includes('sp-monitor') || lines[i].includes('sp-dashboard') || lines[i].includes('pane-title') || lines[i].includes('CLAUDE_CODE_DISABLE_TERMINAL_TITLE')) {
+        if (lines[i].includes('SUPERPOWERD') || lines[i].includes('sp-rotate') || lines[i].includes('sp-monitor') || lines[i].includes('sp-dashboard') || lines[i].includes('sp-session') || lines[i].includes('sp-list') || lines[i].includes('pane-title') || lines[i].includes('CLAUDE_CODE_DISABLE_TERMINAL_TITLE')) {
           continue;
         }
         inBlock = false;

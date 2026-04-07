@@ -25,7 +25,7 @@ if ! command -v brew &>/dev/null; then
 fi
 
 echo "==> Packages"
-brew install --quiet git gh node 2>/dev/null || true
+brew install --quiet git gh node tmux mosh 2>/dev/null || true
 brew install --cask --quiet wezterm 2>/dev/null || true
 brew install --cask --quiet font-fira-code-nerd-font 2>/dev/null || true
 brew install --quiet koekeishiya/formulae/skhd 2>/dev/null || true
@@ -79,6 +79,11 @@ echo "==> WezTerm config"
 mkdir -p "$HOME/.config/wezterm"
 cp "$PROJECT_DIR/wezterm/wezterm.lua" "$HOME/.config/wezterm/wezterm.lua"
 
+# tmux
+echo "==> tmux config"
+mkdir -p "$HOME/.config/tmux"
+cp "$PROJECT_DIR/wezterm/tmux.conf" "$HOME/.config/tmux/tmux.conf"
+
 # Pane title hook
 echo "==> Shell hooks"
 mkdir -p "$HOME/.config/iterm2"
@@ -114,17 +119,13 @@ alias sp-monitor="$PROJECT_DIR/rotation/monitor"
 alias sp-update="$PROJECT_DIR/rotation/update"
 alias sp-dashboard="npx --yes tsx $PROJECT_DIR/dashboard/server.ts"
 alias sp-agent="$PROJECT_DIR/sp-agent"
+alias sp-session="$PROJECT_DIR/sp-session"
+alias sp-list="$PROJECT_DIR/sp-list"
 BLOCK
 fi
 
 # Make scripts executable
-chmod +x "$PROJECT_DIR/rotation/rotate" "$PROJECT_DIR/rotation/monitor" "$PROJECT_DIR/rotation/browser-auth.js" "$PROJECT_DIR/rotation/tokens.js" "$PROJECT_DIR/rotation/update" "$PROJECT_DIR/sp-agent"
-
-# Initialize agent preference
-mkdir -p "$HOME/.config/superpowerd"
-if [[ ! -f "$HOME/.config/superpowerd/agent" ]]; then
-  echo "claude" > "$HOME/.config/superpowerd/agent"
-fi
+chmod +x "$PROJECT_DIR/rotation/rotate" "$PROJECT_DIR/rotation/monitor" "$PROJECT_DIR/rotation/browser-auth.js" "$PROJECT_DIR/rotation/tokens.js" "$PROJECT_DIR/rotation/update" "$PROJECT_DIR/sp-agent" "$PROJECT_DIR/sp-session" "$PROJECT_DIR/sp-list" "$PROJECT_DIR/wezterm/title-loop.sh"
 
 # Initialize data directory
 mkdir -p "$PROJECT_DIR/data"
@@ -319,11 +320,20 @@ echo "Commands:"
 echo "  sp-rotate             Rotate to next account"
 echo "  sp-rotate --status    Show current account"
 echo "  sp-monitor --status   Check monitor"
+echo "  sp-session <name>     Attach to a tmux session"
+echo "  sp-list               List all tmux sessions"
 echo ""
 echo "Shortcuts (in WezTerm):"
 echo "  Opt+Cmd+\`   Toggle WezTerm"
 echo "  Opt+Cmd+P   Open PR in browser"
 echo "  Opt+Cmd+N   Create PR"
 echo "  Opt+Cmd+R   Restart Claude"
+echo ""
+echo "Remote access:"
+echo "  1. Enable Remote Login: System Settings > General > Sharing > Remote Login"
+echo "  2. Install Tailscale on this Mac and your phone: https://tailscale.com"
+echo "  3. SSH in: ssh $(whoami)@\$(hostname).tail-net-name.ts.net"
+echo "  4. Use sp-list to see sessions, sp-session <name> to attach"
+echo "  5. For mobile: Blink Shell (iOS) or Termux (Android)"
 echo ""
 echo "Next: Open WezTerm (or restart it) to activate the pane grid."

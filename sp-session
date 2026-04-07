@@ -1,0 +1,25 @@
+#!/bin/bash
+set -euo pipefail
+
+# Create or attach to a named tmux session.
+#
+# Usage:
+#   sp-session <name> [cwd] [--claude]
+
+NAME="$1"
+CWD="${2:-$PWD}"
+CLAUDE=false
+[[ "${3:-}" == "--claude" ]] && CLAUDE=true
+
+SUPERPOWERD_HOME="${SUPERPOWERD_HOME:-$(cd "$(dirname "$0")" && pwd)}"
+
+if ! tmux has-session -t "$NAME" 2>/dev/null; then
+  tmux new-session -d -s "$NAME" -c "$CWD"
+
+  if $CLAUDE; then
+    tmux send-keys -t "$NAME" "{ $SUPERPOWERD_HOME/wezterm/title-loop.sh & } 2>/dev/null" Enter
+    tmux send-keys -t "$NAME" "claude --dangerously-skip-permissions" Enter
+  fi
+fi
+
+tmux attach-session -t "$NAME"

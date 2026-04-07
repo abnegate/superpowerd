@@ -12,7 +12,7 @@ _superpowerd_title() {
         fi
         [[ -s "$cache" ]] && title+=" · $(cat "$cache")"
     fi
-    printf '\033]1;%s\a' "$title"
+    printf '\033]0;%s\a' "$title"
 }
 precmd_functions+=(_superpowerd_title)
 

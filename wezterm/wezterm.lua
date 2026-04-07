@@ -106,20 +106,6 @@ local function shell(cmd)
   return (out and out ~= "") and out or nil
 end
 
-local function build_title(name)
-  local repo = workspace .. "/" .. name
-  local title = name
-  local branch = shell("git -C " .. repo .. " symbolic-ref --short HEAD")
-  if branch then
-    title = title .. " · " .. branch
-  end
-  return title
-end
-
-local function set_title(pane, title)
-  pane:send_text("\x1b]1;" .. title .. "\x07")
-end
-
 local split_ratios = {
   [2] = { 0.5 },
   [3] = { 0.64, 0.46 },
@@ -206,30 +192,19 @@ wezterm.on("gui-startup", function()
     if right_panes[i] then table.insert(all_panes, right_panes[i]) end
   end
 
+  local session = superpowerd .. "/sp-session"
   for i, pane in ipairs(all_panes) do
     local def = pane_defs[i]
     if def then
-      local title = def.claude and build_title(def.name) or def.name
-      set_title(pane, title)
       if def.claude then
-        pane:send_text("{ while true; do sleep 5; "
-          .. "T=$(basename \"$PWD\"); "
-          .. "B=$(git symbolic-ref --short HEAD 2>/dev/null); "
-          .. "[ -n \"$B\" ] && T=\"$T · $B\"; "
-          .. "[ -n \"$(git status --porcelain 2>/dev/null | head -1)\" ] && T=\"$T *\"; "
-          .. "PR=$(cat /tmp/.superpowerd-pr-$(printf '%s' \"${PWD}:${B}\" | md5 -q) 2>/dev/null); "
-          .. "[ -n \"$PR\" ] && T=\"$T · $PR\"; "
-          .. "printf '\\033]1;%s\\a' \"$T\"; "
-          .. "done & } 2>/dev/null; clear; " .. agent_cmd .. "\n")
+        pane:send_text(session .. " " .. def.name .. " " .. def.cwd .. agent_cmd .. "\n")
+      else
+        pane:send_text(session .. " " .. def.name .. " " .. def.cwd .. "\n")
       end
     end
   end
 
-  local last = all_panes[#all_panes]
-  if last and not pane_defs[#all_panes].claude then
-    last:send_text("caffeinate -d &disown && clear\n")
-  end
-
+  wezterm.background_child_process({ "caffeinate", "-d" })
   window:gui_window():maximize()
 end)
 
@@ -325,13 +300,15 @@ table.insert(config.keys, {
     if bottom_left and bottom_right and bottom_left.left > bottom_right.left then
       bottom_left, bottom_right = bottom_right, bottom_left
     end
+    local next = tonumber(shell("tmux ls -F '#{session_name}' 2>/dev/null | grep -c '^local'")) or 0
+    local session = superpowerd .. "/sp-session"
     if bottom_left then
       local new_left = bottom_left.pane:split({ direction = "Bottom", size = 0.5, cwd = workspace })
-      set_title(new_left, "local")
+      new_left:send_text(session .. " local-" .. (next + 1) .. " " .. workspace .. "\n")
     end
     if bottom_right then
       local new_right = bottom_right.pane:split({ direction = "Bottom", size = 0.5, cwd = workspace })
-      set_title(new_right, "local")
+      new_right:send_text(session .. " local-" .. (next + 2) .. " " .. workspace .. "\n")
     end
   end),
 })
