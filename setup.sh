@@ -125,7 +125,17 @@ BLOCK
 fi
 
 # Make scripts executable
-chmod +x "$PROJECT_DIR/rotation/rotate" "$PROJECT_DIR/rotation/monitor" "$PROJECT_DIR/rotation/browser-auth.js" "$PROJECT_DIR/rotation/tokens.js" "$PROJECT_DIR/rotation/update" "$PROJECT_DIR/sp-agent" "$PROJECT_DIR/sp-session" "$PROJECT_DIR/sp-list" "$PROJECT_DIR/wezterm/title-loop.sh"
+chmod +x \
+  "$PROJECT_DIR/rotation/rotate" \
+  "$PROJECT_DIR/rotation/monitor" \
+  "$PROJECT_DIR/rotation/browser-auth.js" \
+  "$PROJECT_DIR/rotation/tokens.js" \
+  "$PROJECT_DIR/rotation/update" \
+  "$PROJECT_DIR/rotation/capture-hook" \
+  "$PROJECT_DIR/sp-agent" \
+  "$PROJECT_DIR/sp-session" \
+  "$PROJECT_DIR/sp-list" \
+  "$PROJECT_DIR/wezterm/title-loop.sh"
 
 # Initialize data directory
 mkdir -p "$PROJECT_DIR/data"
@@ -139,11 +149,10 @@ node "$PROJECT_DIR/rotation/tokens.js" capture 2>/dev/null && \
   echo "    Saved current account tokens" || \
   echo "    (no session — run: node rotation/tokens.js capture-all after authenticating)"
 
-# Install root deps (Playwright)
-echo "==> Playwright"
+# Install root deps (Playwright's Chromium is fetched by the postinstall hook)
+echo "==> Node deps"
 cd "$PROJECT_DIR"
-npm install --silent 2>/dev/null
-npx playwright install chromium 2>/dev/null || echo "    (chromium install failed, run: npx playwright install chromium)"
+npm install --silent 2>/dev/null || echo "    (npm install failed, run: npm install)"
 
 # Install dashboard deps
 echo "==> Dashboard"
@@ -313,7 +322,7 @@ echo ""
 echo "=== Setup complete ==="
 echo ""
 echo "Running services:"
-echo "  Monitor:    watching ~/.claude/debug/ for rate limits"
+echo "  Monitor:    watching ~/.claude/projects/*.jsonl for rate limits"
 echo "  Dashboard:  http://localhost:3848"
 echo ""
 echo "Commands:"
