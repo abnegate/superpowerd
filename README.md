@@ -14,13 +14,13 @@ Claude Code's Max plan has usage limits. When you hit them, you wait. If you hav
 
 ## What it does
 
-**Account rotation** — Detects rate limits from Claude's debug logs and automatically rotates to the next account. Handles the full OAuth flow: signs out of claude.ai, signs into the next Google account, re-authenticates the CLI, and sends `/login` to every Claude terminal in your WezTerm grid. Manual rotation is a single command.
+**Account rotation** — Detects rate limits from Claude's session logs and automatically rotates to the next account. Captures each account's OAuth tokens once up front, then rotates by swapping the Keychain entry — no browser, no re-auth, no `/login` prompt. Every Claude pane in your WezTerm grid, tmux server, **or** iTerm2 windows is exited and restarted with `--resume <session-id>` so you pick up exactly where you left off; all three muxes can coexist and get handled in the same rotation. Manual rotation is a single command. Without any mux, rotation still swaps the Keychain — you just restart any running `claude` processes yourself to pick up the new credentials.
 
-**Cookie import** — On first rotation, Playwright auto-imports Google session cookies from your real browser (Firefox or Chrome). No manual login step needed. On macOS with Chrome, it decrypts cookies via the Keychain (you'll see a one-time "allow" prompt). Firefox cookies are unencrypted and work everywhere.
+**Token capture** — Run `npm run tokens:capture` (or `node rotation/tokens.js capture-all`) once to authenticate each account in `accounts.conf`. Each login writes the OAuth tokens into `data/tokens.json` keyed by email, alongside the org ID. After that, rotation is a pure Keychain swap — no browser automation needed.
 
 **WezTerm workspace** — Reads `repos.conf` and opens a 2-column grid of terminal panes, one per repo, each running Claude Code. Pane titles show `repo · branch * · PR #123` in real-time. Global shortcuts let you jump to any pane, open/create PRs, or restart Claude.
 
-**Dashboard** — React/TypeScript web UI at `localhost:3848` with two pages. **Overview** shows active sessions, messages, tokens, tool calls, 429 count, token TTL, account list with one-click rotation, CLI auth with lifetime stats, pool utilization bars, per-session cost breakdown by repo, activity sparklines, and a filterable live log stream. **History** shows daily cost and cumulative cost charts, daily and monthly prompt counts, a day-by-hour activity heatmap, cost by model and repo breakdowns, tool usage rankings, and streak/record stats.
+**Dashboard** — React/TypeScript web UI at `localhost:3848` with three pages. **Overview** shows active sessions, messages, tokens, tool calls, 429 count, token TTL, account list with one-click rotation, CLI auth with lifetime stats, pool utilization bars, per-session cost breakdown by repo, activity sparklines, and a filterable live log stream. **History** shows daily cost and cumulative cost charts, daily and monthly prompt counts, a day-by-hour activity heatmap, cost by model and repo breakdowns, tool usage rankings, and streak/record stats. **Insights** profiles your coding rhythm — chronotype (Night Owl / Early Bird / Evening Coder / Afternoon Focused), peak hour, longest streak, time-of-day and day-of-week distributions, cost profile, and scale stats.
 
 **OAuth recovery** — A custom Claude Code slash command (`/auto-updater`) that walks through diagnosis and repair when the auth flow breaks.
 
@@ -33,16 +33,18 @@ bash setup.sh
 ```
 
 The setup script:
-1. Installs Homebrew, git, gh, Node.js, Claude Code, WezTerm, and skhd
-2. Copies `.example` config files and prompts you to edit them
-3. Clones all repos listed in `repos.conf`
-4. Installs WezTerm config, shell hooks, and skhd global shortcuts
-5. Installs Playwright and its Chromium browser
-6. Builds the dashboard
-7. Symlinks the `/auto-updater` slash command into `~/.claude/commands/`
-8. Adds `sp-rotate`, `sp-monitor`, `sp-dashboard`, and `sp-agent` aliases to `.zshrc`
+1. Installs Homebrew, git, gh, Node.js, tmux, mosh, Claude Code, WezTerm, Fira Code Nerd Font, and skhd
+2. Copies `.example` config files so you can edit your local copies
+3. Clones every repo listed in `repos.conf` into `$SUPERPOWERD_WORKSPACE` (default `~/Local`)
+4. Installs the WezTerm config, tmux config, pane-title shell hook, and skhd service
+5. Installs Node dependencies (Playwright's Chromium is fetched by the postinstall hook)
+6. Builds the dashboard and indexes historical sessions
+7. Symlinks every `commands/*.md` slash command into `~/.claude/commands/`
+8. Registers a `SessionStart` hook that captures OAuth tokens each time Claude starts
+9. Installs the `monitor` and `dashboard` launchd agents (or systemd user units on Linux)
+10. Adds `sp-rotate`, `sp-monitor`, `sp-update`, `sp-dashboard`, `sp-agent`, `sp-session`, and `sp-list` aliases to `.zshrc`
 
-After setup, restart WezTerm to activate the pane grid.
+After setup, run `npm run tokens:capture` to log into each account once, then restart WezTerm to activate the pane grid.
 
 ## Configuration
 
@@ -58,7 +60,7 @@ alice.personal@gmail.com
 alice.backup@gmail.com
 ```
 
-All accounts must use Google OAuth on claude.ai. Your existing browser sessions are imported automatically — no extra login needed.
+Run `npm run tokens:capture` once to authenticate each account and cache its OAuth tokens in `data/tokens.json`. After that, rotation swaps Keychain entries in-place — no browser round-trip required.
 
 ### repos.conf
 
@@ -89,18 +91,36 @@ Each entry maps a repo name to `Opt+Cmd+<key>`. The local pane is always `Opt+Cm
 ### Manual rotation
 
 ```bash
-sp-rotate                          # Rotate to next account
-sp-rotate alice.backup@gmail.com   # Switch to specific account
-sp-rotate --status                 # Show current account and CLI auth state
+sp-rotate                             # Rotate to next account
+sp-rotate alice.backup@gmail.com      # Switch to specific account
+sp-rotate --status                    # Show current account and CLI auth state
+sp-rotate --dry-run                   # Simulate a rotation without touching
+                                      # anything — prints the pane mapping, the
+                                      # candidate account, and every mutation it
+                                      # would perform. Combine with an email to
+                                      # dry-run a targeted switch.
+SUPERPOWERD_ROTATE_GRACE=0 sp-rotate  # Skip the 10-second banner+sleep that
+                                      # normally fires before the keychain swap
+SUPERPOWERD_ROTATE_GRACE=60 sp-rotate # Give yourself a 60-second grace window
+                                      # to Ctrl-C if anything looks wrong
 ```
 
 What happens during rotation:
-1. `claude auth logout` signs out the CLI
-2. Playwright launches Chromium, imports your browser cookies, signs out of claude.ai, signs into the next Google account
-3. `claude auth login` runs with a URL interceptor — Playwright captures the OAuth URL, completes the flow, and the CLI receives the callback on localhost
-4. State file is updated
-5. `/login` is sent to all WezTerm panes running Claude (detected by scanning pane text)
-6. macOS notification (or `notify-send` on Linux) confirms the switch
+1. A lockfile is acquired so concurrent rotations can't race each other
+2. The current account's OAuth tokens are re-captured via `tokens.js capture` (keeps the stored bundle fresh) and the dashboard's usage snapshot is refreshed
+3. Every WezTerm pane, tmux pane, **and** iTerm2 session is mapped from pane → TTY → `claude` PID → Claude session ID. All three muxes are queried independently; rotation works with any combination installed. iTerm2 discovery is macOS-only and goes through AppleScript/`osascript`, guarded by a `System Events` check so probing for iTerm2 never accidentally launches it.
+4. Accounts without stored tokens are skipped; the next account with tokens is chosen
+5. **Grace period** — a desktop banner fires ("Rotating to *email* in 10s — *N* pane(s) will restart") and rotate sleeps for `SUPERPOWERD_ROTATE_GRACE` seconds (default 10, set to 0 to skip). This is the last point before anything destructive happens. Ctrl-C during the sleep aborts the rotation with zero side effects — the EXIT trap releases the lock, and tokens/state/keychain are all still untouched.
+6. `tokens.js swap` rewrites the `Claude Code-credentials` Keychain entry in place, preserving any MCP OAuth tokens that live alongside it
+7. `data/state.json` is updated with the new index, email, and timestamp
+8. Each mapped pane receives `/exit` to quit Claude cleanly; stragglers are force-killed by PID after a 3-second wait (the PID came from Step 3, so no re-lookup is needed)
+9. Each pane is restarted with `claude --dangerously-skip-permissions --resume <session-id>`, so you drop back into the exact conversation you were in. WezTerm panes are driven via `wezterm cli send-text`; tmux panes via `tmux send-keys -l`; iTerm2 sessions via AppleScript `tell session to write text "..."`.
+10. A "continue where you left off" nudge is sent to every restarted pane
+11. A macOS notification (or `notify-send` on Linux) confirms the switch
+
+If no mux is reachable at all (no WezTerm GUI, no tmux server, no iTerm2 process), rotation still performs steps 1–7 (plus the grace period) and exits cleanly — it logs "No Claude sessions found in WezTerm, tmux, or iTerm2 panes" and skips 8–10. Your `claude` process keeps running on its cached in-memory tokens until you restart it manually, at which point it picks up the swapped Keychain entry.
+
+**iTerm2 first-run caveat** — iTerm2 automation is gated by macOS TCC (Privacy & Security → Automation). The first time rotate sends keystrokes to iTerm2, macOS prompts to authorize the controlling process. **Run `sp-rotate --dry-run` from an interactive Terminal/iTerm2 session once and approve the prompt before relying on the monitor daemon** — launchd-spawned processes don't have a UI to present the dialog, so a denied/unanswered first prompt will silently cause the iTerm2 branch to fail under the daemon (rotation will still Keychain-swap, just skip the pane restart).
 
 ### Automatic rotation
 
@@ -110,12 +130,13 @@ sp-monitor --stop      # Stop it
 sp-monitor --status    # Check if running
 ```
 
-The monitor tails `~/.claude/debug/*.txt` for rate limit signals:
-- HTTP 429 / 529 status codes
-- "Rate limited", "usage limit", "too many requests", "overloaded", "capacity"
-- Automatically switches to the newest debug log when sessions change
+Setup also installs a launchd agent (`com.superpowerd.monitor`) / systemd user unit (`superpowerd-monitor`) that keeps the monitor running across reboots, so the `--daemon` flag is only needed for one-off foreground runs.
 
-When a signal is detected, `sp-rotate` runs with a 5-minute cooldown between rotations. Transient 429s on the `client_data` endpoint (normal startup bursts) are filtered out.
+The monitor tails every `~/.claude/projects/**/*.jsonl` file modified in the last 30 minutes and watches for rate-limit signals:
+- `"isApiErrorMessage":true` entries containing "hit your limit", "rate limit", "limit reached", or "exceeded"
+- Watchers refresh every 60 seconds to pick up new sessions and replace any that died
+
+When a signal is detected, `sp-rotate` runs with a 5-minute cooldown between rotations.
 
 ### Agent switching
 
@@ -154,6 +175,15 @@ sp-dashboard    # http://localhost:3848
 - Records: longest session, duration, speculation savings
 - Streak stats: current and longest active-day streaks
 
+**Insights** page:
+- Top metrics: chronotype (*Night Owl* / *Early Bird* / *Evening Coder* / *Afternoon Focused*), prompts/day, tools/prompt, cost/prompt, current streak
+- Work pattern: peak hour, peak day, weekend work %, late-night %, longest streak
+- Cost profile: total API value, per-day / per-prompt cost, biggest-spend day, cache read ratio
+- Time-of-day distribution bar (late night / morning / afternoon / evening)
+- Day-of-week activity bar chart
+- Coding DNA: repos worked on, top repo, favorite tool, total tool calls, one-liner %
+- Scale: first session date, total prompts, active days, total sessions, total messages
+
 For development, run the Vite dev server and API server separately:
 
 ```bash
@@ -178,31 +208,25 @@ Standard macOS text editing shortcuts (Opt+arrows for word nav, Cmd+arrows for l
 
 ### OAuth recovery
 
-If rotation fails — stale browser session, wrong account selected, CLI stuck — use the Claude Code slash command:
+If rotation fails — a stored refresh token got revoked, the Keychain entry is missing, the CLI is stuck on the wrong account, or a pane won't come back up — use the Claude Code slash command:
 
 ```
 /auto-updater
 ```
 
-It runs through five recovery procedures: CLI auth reset, browser session cleanup, full credential reset, browser-auth.js selector updates (when claude.ai UI changes), and WezTerm terminal re-auth.
+It walks through diagnosing the CLI's auth state, the contents of `data/state.json` / `data/tokens.json`, the rotation log, and stepping you through a CLI auth reset, a targeted re-capture (`node rotation/tokens.js capture-all`), or the Playwright fallback in `rotation/browser-auth.js`.
 
-## How cookie import works
+## How token rotation works
 
-On the first rotation (when Playwright's persistent profile has no Google cookies), superpowerd imports session cookies from your real browser:
+Claude Code stores its OAuth credentials in a single macOS Keychain item named `Claude Code-credentials` (a JSON blob containing access token, refresh token, expiry, scopes, subscription type, and rate-limit tier under the `claudeAiOauth` key). `tokens.js` uses the `security` CLI to read that blob, splice in a different account's `claudeAiOauth` subtree, and write it back. Any MCP OAuth tokens stored alongside it in the same blob are preserved.
 
-**Firefox** (any platform) — Copies `cookies.sqlite` from the Firefox profile directory, reads the `moz_cookies` table via `sqlite3`, filters for Google/Claude/Anthropic domains, and injects them into Playwright's browser context.
+This means rotation is effectively an atomic Keychain swap — no browser, no `claude auth login`, no redirect URLs. The only prerequisite is that every account has already been authenticated once (via `npm run tokens:capture`) so its token bundle lives in `data/tokens.json`. Each bundle also caches the org ID, looked up from `https://api.anthropic.com/api/oauth/claude_cli/roles` at capture time.
 
-**Chrome on macOS** — Copies the `Cookies` SQLite database, reads `encrypted_value` as hex from the `cookies` table, retrieves the "Chrome Safe Storage" password from macOS Keychain (`security find-generic-password`), derives an AES-128-CBC key via PBKDF2 (salt: `saltysalt`, 1003 iterations), and decrypts each cookie. The Keychain access prompt appears once — click "Allow" or "Always Allow".
+A `SessionStart` hook (`rotation/capture-hook`) is registered in `~/.claude/settings.json` so that every time Claude starts, the current account's tokens are re-captured in the background. That keeps `data/tokens.json` fresh as Claude refreshes its access token, so swaps never install a stale bundle.
 
-**Chrome on Linux** — Reads unencrypted cookie values directly from the `Cookies` database.
+## Legacy: browser-driven login (`browser-auth.js`)
 
-**No browser sessions** — Run `npm run browser:setup` to open Playwright's Chromium and log into your Google accounts manually. Sessions persist in `data/browser/`.
-
-After the first import, Playwright's persistent profile stores the sessions for future rotations.
-
-## How the OAuth URL interceptor works
-
-`claude auth login` uses Node's `open` package to launch a browser with an OAuth URL. Superpowerd sets the `BROWSER` environment variable to a tiny shell script that writes the URL to a temp file instead of opening a browser. The rotation script polls for this file, reads the URL, and navigates Playwright to it — completing the OAuth flow in the same browser context that already has the right Google session. The OAuth callback redirects to `localhost`, which the `claude auth login` process is listening on.
+`rotation/browser-auth.js` is kept for the rare case where the Keychain swap flow fails (e.g. the stored refresh token has been revoked) and you need to re-authenticate through Google via Playwright. It imports cookies from Firefox (`cookies.sqlite`) or Chrome (decrypting via `Chrome Safe Storage` in the macOS Keychain, PBKDF2/`saltysalt`/1003 iterations/AES-128-CBC), drives the claude.ai sign-in flow, intercepts the `claude auth login` OAuth URL via a `BROWSER` trap script, and completes the callback. None of this runs during normal rotation. Trigger it manually with `node rotation/browser-auth.js login <email>` or seed cookies with `npm run browser:setup`.
 
 ## Project structure
 
@@ -228,33 +252,41 @@ superpowerd/
 ├── rotation/
 │   ├── rotate                       # Account rotation (bash)
 │   │                                  Round-robin or targeted rotation
-│   │                                  Sends /login to Claude terminals via wezterm cli
+│   │                                  Lockfile guards against concurrent rotations
+│   │                                  Swaps Keychain via tokens.js, restarts panes with --resume
+│   │                                  Mux-agnostic: drives WezTerm, tmux, and iTerm2
+│   │                                    via a tiny abstraction (iTerm2 uses AppleScript)
+│   │                                  Works with none installed (Keychain swap only)
+│   │                                  --dry-run flag for safe flow verification
 │   │                                  Desktop notifications (macOS + Linux)
 │   ├── monitor                      # Rate limit watcher daemon (bash)
-│   │                                  Tails ~/.claude/debug/*.txt
+│   │                                  Tails ~/.claude/projects/**/*.jsonl
+│   │                                  Matches "isApiErrorMessage":true + limit keywords
 │   │                                  5-minute cooldown between rotations
-│   │                                  Auto-follows new debug log files
-│   ├── browser-auth.js              # Browser automation (Playwright)
-│   │                                  Auto-imports Firefox/Chrome cookies
-│   │                                  Chrome Keychain decryption on macOS
-│   │                                  OAuth URL interceptor via BROWSER env var
-│   ├── tokens.js                    # OAuth token caching and org mapping
+│   │                                  Refreshes watchers every 60s as sessions come and go
+│   ├── tokens.js                    # OAuth token store + Keychain swap
+│   │                                  capture / capture-all / swap / list / status
+│   │                                  Preserves MCP OAuth subtree on swap
+│   ├── capture-hook                 # SessionStart hook — re-captures tokens on launch
 │   ├── index-sessions.js            # Maps Claude sessions to repos and costs
-│   └── capture-hook                 # Shell hook for session event capture
+│   ├── update                       # Self-update: git pull, rebuild, restart services
+│   └── browser-auth.js              # Legacy Playwright fallback (cookie import + OAuth trap)
 │
 ├── dashboard/
 │   ├── server.ts                    # Express API server
-│   │                                  GET  /api/status       — accounts, current, monitor
-│   │                                  GET  /api/auth         — claude auth status
-│   │                                  GET  /api/usage        — today's stats, totals, token expiry
-│   │                                  GET  /api/claude-usage — pool utilization per account
-│   │                                  GET  /api/sessions     — active sessions with cost
-│   │                                  GET  /api/history      — daily costs, per-repo breakdown
-│   │                                  GET  /api/history-extended — prompts, heatmap, streaks
-│   │                                  GET  /api/tools        — top tool usage
-│   │                                  POST /api/rotate       — trigger rotation
-│   │                                  POST /api/monitor/*    — start/stop
-│   │                                  GET  /api/logs         — SSE log stream
+│   │                                  GET  /api/status           — accounts, current, monitor
+│   │                                  GET  /api/auth             — claude auth status
+│   │                                  GET  /api/usage            — today's stats, totals, token expiry
+│   │                                  GET  /api/claude-usage     — pool utilization per account
+│   │                                  GET  /api/sessions         — active sessions with cost
+│   │                                  GET  /api/history          — daily costs, per-repo breakdown
+│   │                                  GET  /api/history-extended — prompts, heatmap, streaks, hourly
+│   │                                  GET  /api/tools            — top tool usage
+│   │                                  GET  /api/update/check     — check for superpowerd updates
+│   │                                  POST /api/update           — trigger `sp-update`
+│   │                                  POST /api/rotate           — trigger rotation
+│   │                                  POST /api/monitor/{start,stop} — monitor control
+│   │                                  GET  /api/logs             — SSE log stream
 │   ├── vite.config.ts               # Vite + React + proxy
 │   ├── tsconfig.json
 │   ├── src/
@@ -263,9 +295,10 @@ superpowerd/
 │   │   ├── index.css                # Dark theme matching WezTerm
 │   │   ├── pages/
 │   │   │   ├── Overview.tsx         # Accounts, auth, sessions, activity, logs
-│   │   │   └── History.tsx          # Cost charts, heatmap, tool usage, repos
+│   │   │   ├── History.tsx          # Cost charts, heatmap, tool usage, repos
+│   │   │   └── Insights.tsx         # Chronotype, peak hour, time/day distributions
 │   │   └── components/
-│   │       ├── Sidebar.tsx          # Navigation with status indicator
+│   │       ├── Sidebar.tsx          # Navigation with status indicator (3 tabs)
 │   │       ├── Charts.tsx           # Sparkline, BarChart, AreaChart, tooltips
 │   │       └── UsageBar.tsx         # Pool utilization bar with countdown
 │   └── dist/                        # Built assets (served by Express)
@@ -282,8 +315,9 @@ superpowerd/
     ├── tokens.json                  # OAuth tokens per account
     ├── usage-history.json           # Usage burn rate tracking
     ├── usage-snapshots.json         # Last-known usage per account
-    ├── monitor.pid                  # Daemon PID
-    ├── monitor.log                  # Monitor log
+    ├── monitor.pid                  # Monitor daemon PID
+    ├── monitor.log                  # Monitor log (launchd/systemd stdout+stderr)
+    ├── dashboard.log                # Dashboard log (launchd/systemd stdout+stderr)
     ├── rotate.log                   # Rotation log
     └── browser/                     # Playwright persistent profile
 ```
@@ -292,8 +326,11 @@ superpowerd/
 
 - macOS or Linux
 - Node.js 20+
+- Claude Code CLI (`claude`) — installed by `setup.sh`
 - GitHub CLI (`gh`) — authenticated
-- Playwright installs its own Chromium automatically
+- `sqlite3` (used by the legacy `browser-auth.js` cookie importer)
+- macOS Keychain holds the `Claude Code-credentials` entry that rotation swaps; on Linux, the CLI's credential store is used instead
+- Playwright installs its own Chromium automatically (only exercised by `browser-auth.js` fallbacks)
 - skhd (macOS only, for global hotkeys — installed by `setup.sh`)
 
 ## Environment variables
@@ -302,6 +339,7 @@ superpowerd/
 |----------|---------|-------------|
 | `SUPERPOWERD_HOME` | `~/Local/superpowerd` | Project root, used by wezterm.lua and shell aliases |
 | `SUPERPOWERD_WORKSPACE` | `~/Local` | Directory where repos are cloned |
+| `SUPERPOWERD_ROTATE_GRACE` | `10` | Seconds to wait (with a banner notification) between pane mapping and the keychain swap in `rotation/rotate`. Set to `0` to skip the grace period and rotate immediately. |
 | `PORT` | `3848` | Dashboard server port |
 
 ## License
