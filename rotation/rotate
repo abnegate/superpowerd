@@ -4,15 +4,35 @@
 # Flow:
 #   1. Acquire lock (prevent concurrent rotations)
 #   2. Save current account's tokens
-#   3. Map each WezTerm pane -> TTY -> claude PID -> session ID
+#   3. Map each WezTerm/tmux/iTerm2 pane -> TTY -> claude PID -> session ID
 #   4. Swap keychain entry to the next account
 #   5. Kill Claude in each pane, restart with --resume <session-id>
 #   6. Send "continue where you left off" to each pane
+#
+# Pane discovery works with WezTerm, tmux, and/or iTerm2 (any combination —
+# all three can coexist). iTerm2 support is macOS-only and uses AppleScript
+# via osascript; it's guarded by a System Events check so probing for iTerm2
+# never accidentally launches it. If no mux is reachable, rotate still swaps
+# the keychain and updates state — it just can't restart any running Claude
+# processes for you, so you'll need to restart them manually to pick up the
+# new credentials.
 #
 # Usage:
 #   rotate              # Next account
 #   rotate <email>      # Specific account
 #   rotate --status     # Show current
+#   rotate --dry-run    # Simulate a rotation without touching the keychain,
+#                         state file, tokens, or any pane. Read-only paths
+#                         (pane mapping, candidate selection, token lookup)
+#                         still run so you can verify the plumbing. Can be
+#                         combined with <email>.
+#
+# Environment:
+#   SUPERPOWERD_ROTATE_GRACE  Seconds to wait between the pane mapping step
+#                             and the keychain swap, during which a banner
+#                             notification warns the user that rotation is
+#                             about to happen. Default: 10. Set to 0 to skip
+#                             the grace period and rotate immediately.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -23,15 +43,39 @@ ACCOUNTS_FILE="$PROJECT_DIR/accounts.conf"
 LOG_FILE="$DATA_DIR/rotate.log"
 LOCK_FILE="$DATA_DIR/rotate.lock"
 
+# Seconds between the pane mapping step and the keychain swap. During this
+# window a banner notification tells the user rotation is imminent. Setting
+# it to 0 disables the grace period entirely.
+GRACE_SECONDS=${SUPERPOWERD_ROTATE_GRACE:-10}
+if ! [[ "$GRACE_SECONDS" =~ ^[0-9]+$ ]]; then
+  GRACE_SECONDS=10
+fi
+
+# Strip --dry-run out of the argument list so the rest of the script can
+# keep treating $1 as the optional target email or --status flag.
+DRY_RUN=false
+NEW_ARGS=()
+for arg in "$@"; do
+  if [[ "$arg" == "--dry-run" ]]; then
+    DRY_RUN=true
+  else
+    NEW_ARGS+=("$arg")
+  fi
+done
+set -- "${NEW_ARGS[@]+"${NEW_ARGS[@]}"}"
+
 mkdir -p "$DATA_DIR"
 
 log() {
-  local msg="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $1"
+  local prefix=""
+  if $DRY_RUN; then prefix="[DRY-RUN] "; fi
+  local msg="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] ${prefix}$1"
   echo "$msg"
-  echo "$msg" >> "$LOG_FILE"
+  if ! $DRY_RUN; then echo "$msg" >> "$LOG_FILE"; fi
 }
 
 notify() {
+  if $DRY_RUN; then return 0; fi
   osascript -e "display notification \"$1\" with title \"Superpowerd\"" 2>/dev/null \
     || notify-send "Superpowerd" "$1" 2>/dev/null \
     || true
@@ -61,6 +105,7 @@ acquire_lock() {
 }
 
 release_lock() {
+  if $DRY_RUN; then return 0; fi
   rm -f "$LOCK_FILE"
 }
 trap release_lock EXIT
@@ -105,20 +150,170 @@ sync_state() {
   fi
 }
 
+# Mux abstraction: send an escape keypress to a pane
+mux_send_escape() {
+  local kind=$1 target=$2
+  case $kind in
+    wezterm) wezterm cli send-text --pane-id "$target" --no-paste $'\x1b' 2>/dev/null || true ;;
+    tmux)    tmux send-keys -t "$target" Escape 2>/dev/null || true ;;
+    iterm2)
+      osascript <<APPLESCRIPT 2>/dev/null || true
+set escChar to (character id 27)
+tell application "iTerm2"
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with s in sessions of t
+        if id of s is "$target" then
+          tell s to write text escChar newline no
+        end if
+      end repeat
+    end repeat
+  end repeat
+end tell
+APPLESCRIPT
+      ;;
+  esac
+}
+
+# Mux abstraction: send a line of literal text followed by Enter
+mux_send_line() {
+  local kind=$1 target=$2 text=$3
+  case $kind in
+    wezterm)
+      wezterm cli send-text --pane-id "$target" "$text" 2>/dev/null || true
+      wezterm cli send-text --pane-id "$target" --no-paste $'\r' 2>/dev/null || true
+      ;;
+    tmux)
+      tmux send-keys -t "$target" -l "$text" 2>/dev/null || true
+      tmux send-keys -t "$target" Enter 2>/dev/null || true
+      ;;
+    iterm2)
+      # Escape backslashes and double quotes so the text survives as an
+      # AppleScript string literal. Order matters — backslashes first.
+      local escaped=${text//\\/\\\\}
+      escaped=${escaped//\"/\\\"}
+      osascript <<APPLESCRIPT 2>/dev/null || true
+tell application "iTerm2"
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with s in sessions of t
+        if id of s is "$target" then
+          tell s to write text "$escaped" newline yes
+        end if
+      end repeat
+    end repeat
+  end repeat
+end tell
+APPLESCRIPT
+      ;;
+  esac
+}
+
+# Map panes to Claude session IDs, across both WezTerm and tmux.
+#
+# Emits lines: <kind>\t<target>\t<pid>\t<session_id>
+#   kind    "wezterm" or "tmux"
+#   target  pane identifier usable with `wezterm cli send-text --pane-id` or
+#           `tmux send-keys -t`
+#   pid     PID of the claude process running in that pane (used for
+#           signal-based force-kill after /exit)
+#   session_id  Claude session ID from ~/.claude/sessions/<pid>.json
+#
+# Returns 0 even when no panes are found, no mux is installed, or a mux is
+# installed but has no running instance — so rotate can still proceed to the
+# keychain swap.
 map_pane_sessions() {
-  wezterm cli list --format json 2>/dev/null | node -e "
+  local pairs=""
+
+  # Collect <kind>\t<target>\t<tty> triples from every mux we can reach.
+  # Missing muxes, missing servers, and malformed output are all tolerated
+  # via `|| true` / suppressed stderr.
+
+  if command -v wezterm >/dev/null 2>&1; then
+    local wezterm_pairs
+    wezterm_pairs=$(wezterm cli list --format json 2>/dev/null | node -e "
+      try {
+        var panes = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+        for (var p of panes) {
+          if (p && p.pane_id !== undefined && p.tty_name) {
+            console.log('wezterm\t' + p.pane_id + '\t' + p.tty_name);
+          }
+        }
+      } catch {}
+    " 2>/dev/null || true)
+    if [[ -n "$wezterm_pairs" ]]; then
+      pairs+="$wezterm_pairs"$'\n'
+    fi
+  fi
+
+  if command -v tmux >/dev/null 2>&1; then
+    local tmux_pairs
+    tmux_pairs=$(tmux list-panes -a -F '#{pane_id} #{pane_tty}' 2>/dev/null \
+      | awk 'NF==2 {print "tmux\t" $1 "\t" $2}' || true)
+    if [[ -n "$tmux_pairs" ]]; then
+      pairs+="$tmux_pairs"$'\n'
+    fi
+  fi
+
+  # iTerm2 (macOS only). We guard with System Events so that probing for
+  # iTerm2 never accidentally launches it when it isn't already running.
+  if [[ "$(uname)" == "Darwin" ]] && command -v osascript >/dev/null 2>&1; then
+    local iterm2_running
+    iterm2_running=$(osascript -e 'tell application "System Events" to (exists (processes where name is "iTerm2"))' 2>/dev/null || echo "false")
+    if [[ "$iterm2_running" == "true" ]]; then
+      local iterm2_pairs
+      iterm2_pairs=$(osascript <<'APPLESCRIPT' 2>/dev/null || true
+set SEP to (character id 9)
+set NL to (character id 10)
+tell application "iTerm2"
+  set output to ""
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with s in sessions of t
+        try
+          set output to output & "iterm2" & SEP & (id of s as string) & SEP & (tty of s as string) & NL
+        end try
+      end repeat
+    end repeat
+  end repeat
+  return output
+end tell
+APPLESCRIPT
+)
+      if [[ -n "$iterm2_pairs" ]]; then
+        pairs+="$iterm2_pairs"$'\n'
+      fi
+    fi
+  fi
+
+  # Nothing to enrich? Return empty (not an error).
+  if [[ -z "${pairs//[[:space:]]/}" ]]; then
+    return 0
+  fi
+
+  # Single enrichment pass: for each <kind, target, tty>, grep ps for a
+  # claude process on that tty and look up its session file.
+  printf '%s' "$pairs" | node -e "
     var fs = require('fs');
     var path = require('path');
     var child = require('child_process');
-    var panes = JSON.parse(fs.readFileSync('/dev/stdin','utf8'));
-    var ps = child.execFileSync('ps', ['-eo', 'pid,tty,comm'], { encoding: 'utf8' });
+    var lines = fs.readFileSync('/dev/stdin','utf8').split('\n').filter(Boolean);
+    var ps;
+    try {
+      ps = child.execFileSync('ps', ['-eo', 'pid,tty,comm'], { encoding: 'utf8' });
+    } catch { process.exit(0); }
     var psLines = ps.split('\n');
-    for (var p of panes) {
-      var tty = p.tty_name.replace('/dev/', '');
+    for (var ln of lines) {
+      var parts = ln.split('\t');
+      if (parts.length < 3) continue;
+      var kind = parts[0];
+      var target = parts[1];
+      var tty = parts[2].replace('/dev/', '');
+      if (!tty) continue;
       var pid = null;
-      for (var line of psLines) {
-        if (line.includes(tty) && line.includes('claude')) {
-          pid = line.trim().split(/\s+/)[0];
+      for (var l of psLines) {
+        if (l.includes(tty) && l.includes('claude')) {
+          pid = l.trim().split(/\s+/)[0];
           break;
         }
       }
@@ -126,14 +321,16 @@ map_pane_sessions() {
       var sessionFile = path.join(process.env.HOME, '.claude', 'sessions', pid + '.json');
       try {
         var session = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
-        console.log(p.pane_id + ' ' + session.sessionId);
+        console.log(kind + '\t' + target + '\t' + pid + '\t' + session.sessionId);
       } catch {}
     }
-  " 2>/dev/null
+  " 2>/dev/null || true
 }
 
-# Sync state before reading it
-sync_state
+# Sync state before reading it (skipped in dry-run so state.json is untouched)
+if ! $DRY_RUN; then
+  sync_state
+fi
 
 CURRENT=$(get_current)
 CURRENT_EMAIL=${ACCOUNTS[$CURRENT]}
@@ -195,107 +392,181 @@ if [[ "$CURRENT" == "$NEXT_INDEX" ]]; then
   exit 0
 fi
 
-# Acquire lock
-acquire_lock
+# Acquire lock (skipped in dry-run so a concurrent real rotation isn't blocked)
+if ! $DRY_RUN; then
+  acquire_lock
+fi
 
 log "=== Rotating: $CURRENT_EMAIL -> $NEXT_EMAIL ==="
-notify "Rotating to $NEXT_EMAIL..."
+if $DRY_RUN; then
+  log "(dry-run: no side effects will be performed)"
+elif [ "$GRACE_SECONDS" -eq 0 ]; then
+  # Fire the immediate notification only when there's no grace period to
+  # avoid stacking two banners a couple of seconds apart.
+  notify "Rotating to $NEXT_EMAIL..."
+fi
 
 # Step 1: Save current tokens + usage snapshot
 log "Step 1: Saving current tokens"
-node "$SCRIPT_DIR/tokens.js" capture 2>&1 | while read -r line; do log "  $line"; done
-curl -s "http://localhost:3848/api/claude-usage" > /dev/null 2>&1 || true
+if $DRY_RUN; then
+  log "  would run: tokens.js capture ($CURRENT_EMAIL)"
+else
+  node "$SCRIPT_DIR/tokens.js" capture 2>&1 | while read -r line; do log "  $line"; done
+  curl -s "http://localhost:3848/api/claude-usage" > /dev/null 2>&1 || true
+fi
 
-# Step 2: Map panes to session IDs (written to temp file: pane_id\tsession_id)
+# Step 2: Map panes to session IDs (read-only — runs in dry-run too)
 log "Step 2: Mapping pane sessions"
-CURRENT_PANE=${WEZTERM_PANE:-}
+CURRENT_WEZTERM_PANE=${WEZTERM_PANE:-}
+CURRENT_TMUX_PANE=${TMUX_PANE:-}
+# iTerm2 sets ITERM_SESSION_ID="w<win>t<tab>p<pane>:<uuid>"; we only care
+# about the UUID suffix, which matches `id of session` in AppleScript.
+CURRENT_ITERM2_PANE=${ITERM_SESSION_ID:+${ITERM_SESSION_ID#*:}}
 PANE_MAP="$DATA_DIR/pane-map.tmp"
+if $DRY_RUN; then PANE_MAP="$DATA_DIR/pane-map.dryrun.tmp"; fi
 : > "$PANE_MAP"
 
-map_pane_sessions | while read -r pane_id session_id; do
-  if [ "$pane_id" != "$CURRENT_PANE" ]; then
-    echo "$pane_id	$session_id" >> "$PANE_MAP"
-    log "  Pane $pane_id -> $session_id"
-  fi
+map_pane_sessions | while IFS=$'\t' read -r kind target pid session_id; do
+  # Skip the pane we're running in, so rotate doesn't try to kill itself
+  if [[ "$kind" == "wezterm" && "$target" == "$CURRENT_WEZTERM_PANE" ]]; then continue; fi
+  if [[ "$kind" == "tmux"    && "$target" == "$CURRENT_TMUX_PANE"    ]]; then continue; fi
+  if [[ "$kind" == "iterm2"  && "$target" == "$CURRENT_ITERM2_PANE"  ]]; then continue; fi
+  printf '%s\t%s\t%s\t%s\n' "$kind" "$target" "$pid" "$session_id" >> "$PANE_MAP"
+  log "  Pane $kind:$target (pid $pid) -> $session_id"
 done
 
 PANE_COUNT=$(wc -l < "$PANE_MAP" | tr -d ' ')
 if [ "$PANE_COUNT" -eq 0 ]; then
-  log "  No Claude sessions found in WezTerm panes"
+  log "  No Claude sessions found in WezTerm, tmux, or iTerm2 panes"
+  log "  (keychain swap will still proceed — restart any running Claude manually)"
+fi
+
+# Grace period: heads-up before anything destructive happens. Fires after
+# the pane mapping so the warning can include the exact pane count, and
+# before the keychain swap so Ctrl-C during the sleep aborts with zero
+# side effects (the EXIT trap releases the lock, tokens/state/keychain
+# are all untouched).
+if [ "$GRACE_SECONDS" -gt 0 ]; then
+  GRACE_MSG="Rotating to $NEXT_EMAIL in ${GRACE_SECONDS}s"
+  if [ "$PANE_COUNT" -gt 0 ]; then
+    GRACE_MSG="$GRACE_MSG — $PANE_COUNT pane(s) will restart"
+  fi
+  log "Grace period: $GRACE_MSG"
+  if $DRY_RUN; then
+    log "  would notify + sleep ${GRACE_SECONDS}s"
+  else
+    notify "$GRACE_MSG"
+    sleep "$GRACE_SECONDS"
+  fi
 fi
 
 # Step 3: Swap keychain to next account
 log "Step 3: Swapping keychain"
-if ! node "$SCRIPT_DIR/tokens.js" swap "$NEXT_EMAIL" 2>&1 | while read -r line; do log "  $line"; done; then
-  log "ERROR: Failed to swap to $NEXT_EMAIL (no stored tokens)"
-  notify "Rotation failed — capture tokens for $NEXT_EMAIL first"
-  rm -f "$PANE_MAP"
-  exit 1
+if $DRY_RUN; then
+  log "  would swap keychain: $CURRENT_EMAIL -> $NEXT_EMAIL"
+  # Verify tokens still exist for the target — mirror the real swap's precondition
+  HAS_TARGET=$(node -e "
+    try {
+      var t = JSON.parse(require('fs').readFileSync('$DATA_DIR/tokens.json', 'utf8'));
+      console.log(t['$NEXT_EMAIL'] && t['$NEXT_EMAIL'].accessToken ? 'yes' : 'no');
+    } catch { console.log('no'); }
+  " 2>/dev/null)
+  if [[ "$HAS_TARGET" != "yes" ]]; then
+    log "  WARNING: no stored tokens for $NEXT_EMAIL — real rotation would fail here"
+  fi
+else
+  if ! node "$SCRIPT_DIR/tokens.js" swap "$NEXT_EMAIL" 2>&1 | while read -r line; do log "  $line"; done; then
+    log "ERROR: Failed to swap to $NEXT_EMAIL (no stored tokens)"
+    notify "Rotation failed — capture tokens for $NEXT_EMAIL first"
+    rm -f "$PANE_MAP"
+    exit 1
+  fi
 fi
 
 # Step 4: Update state
 log "Step 4: State update"
-update_state "$NEXT_INDEX" "$NEXT_EMAIL"
+if $DRY_RUN; then
+  log "  would update state: current=$NEXT_INDEX email=$NEXT_EMAIL"
+else
+  update_state "$NEXT_INDEX" "$NEXT_EMAIL"
+fi
 
 # Step 5: Kill and restart each pane with its exact session ID
 log "Step 5: Exiting agents"
-# Send /exit to each Claude session (the slash command that quits Claude)
-while IFS='	' read -r pane_id session_id; do
-  log "  Exiting pane $pane_id"
-  # Clear any pending input first
-  wezterm cli send-text --pane-id "$pane_id" --no-paste $'\x1b' 2>/dev/null || true
-  sleep 0.2
-  # Send /exit command to quit Claude cleanly
-  wezterm cli send-text --pane-id "$pane_id" "/exit" 2>/dev/null || true
-  wezterm cli send-text --pane-id "$pane_id" --no-paste $'\r' 2>/dev/null || true
-done < "$PANE_MAP"
+if $DRY_RUN; then
+  while IFS=$'\t' read -r kind target pid session_id; do
+    log "  would /exit pane $kind:$target (pid $pid, session $session_id)"
+  done < "$PANE_MAP"
+else
+  # Send /exit to each Claude session (the slash command that quits Claude)
+  while IFS=$'\t' read -r kind target pid session_id; do
+    log "  Exiting pane $kind:$target"
+    # Clear any pending input first
+    mux_send_escape "$kind" "$target"
+    sleep 0.2
+    # Send /exit command to quit Claude cleanly
+    mux_send_line "$kind" "$target" "/exit"
+  done < "$PANE_MAP"
 
-# Wait for all Claude processes to exit
-log "  Waiting for processes to exit..."
-sleep 3
+  if [ "$PANE_COUNT" -gt 0 ]; then
+    # Wait for all Claude processes to exit
+    log "  Waiting for processes to exit..."
+    sleep 3
 
-# Force kill any that didn't exit
-while IFS='	' read -r pane_id session_id; do
-  # Check if claude is still running in this pane's TTY
-  PANE_TTY=$(wezterm cli list --format json 2>/dev/null | node -e "
-    var panes = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-    var p = panes.find(function(x) { return x.pane_id == $pane_id; });
-    if (p) console.log(p.tty_name.replace('/dev/',''));
-  " 2>/dev/null)
-  if [ -n "$PANE_TTY" ]; then
-    CLAUDE_PID=$(ps -eo pid,tty,comm | grep "$PANE_TTY" | grep claude | awk '{print $1}' | head -1)
-    if [ -n "$CLAUDE_PID" ]; then
-      log "  Force killing PID $CLAUDE_PID in pane $pane_id"
-      kill "$CLAUDE_PID" 2>/dev/null || true
-      sleep 1
-    fi
+    # Force kill any that didn't exit — we already know each PID from Step 2,
+    # so there's no need to re-walk the mux listing.
+    while IFS=$'\t' read -r kind target pid session_id; do
+      if kill -0 "$pid" 2>/dev/null; then
+        log "  Force killing PID $pid in pane $kind:$target"
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+      fi
+    done < "$PANE_MAP"
   fi
-done < "$PANE_MAP"
+fi
 
 # Step 6: Restart with session IDs
 log "Step 6: Restarting agents"
-while IFS='	' read -r pane_id session_id; do
-  log "  Starting pane $pane_id (session $session_id)"
-  wezterm cli send-text --pane-id "$pane_id" "claude --dangerously-skip-permissions --resume $session_id" 2>/dev/null || true
-  wezterm cli send-text --pane-id "$pane_id" --no-paste $'\r' 2>/dev/null || true
-done < "$PANE_MAP"
+if $DRY_RUN; then
+  while IFS=$'\t' read -r kind target pid session_id; do
+    log "  would restart pane $kind:$target: claude --dangerously-skip-permissions --resume $session_id"
+  done < "$PANE_MAP"
+else
+  while IFS=$'\t' read -r kind target pid session_id; do
+    log "  Starting pane $kind:$target (session $session_id)"
+    mux_send_line "$kind" "$target" "claude --dangerously-skip-permissions --resume $session_id"
+  done < "$PANE_MAP"
+fi
 
 # Step 7: Wait for startup, then send continue
 if [ "$PANE_COUNT" -gt 0 ]; then
   log "Step 7: Sending continue"
-  sleep 5
-  while IFS='	' read -r pane_id session_id; do
-    log "  Continue -> pane $pane_id"
-    wezterm cli send-text --pane-id "$pane_id" "continue where you left off" 2>/dev/null || true
-    wezterm cli send-text --pane-id "$pane_id" --no-paste $'\r' 2>/dev/null || true
-    sleep 0.3
-  done < "$PANE_MAP"
+  if $DRY_RUN; then
+    while IFS=$'\t' read -r kind target pid session_id; do
+      log "  would send 'continue where you left off' to pane $kind:$target"
+    done < "$PANE_MAP"
+  else
+    sleep 5
+    while IFS=$'\t' read -r kind target pid session_id; do
+      log "  Continue -> pane $kind:$target"
+      mux_send_line "$kind" "$target" "continue where you left off"
+      sleep 0.3
+    done < "$PANE_MAP"
+  fi
 fi
 
 rm -f "$PANE_MAP"
 
-log "=== Now using: $NEXT_EMAIL ==="
-notify "Now using $NEXT_EMAIL"
-echo ""
-echo "Switched to: $NEXT_EMAIL"
-echo "Restarted $PANE_COUNT agents with exact session IDs."
+if $DRY_RUN; then
+  log "=== Dry run complete: would switch to $NEXT_EMAIL ==="
+  echo ""
+  echo "[DRY-RUN] Would switch to: $NEXT_EMAIL"
+  echo "[DRY-RUN] Would restart $PANE_COUNT agent(s) with exact session IDs."
+  echo "[DRY-RUN] No changes made to keychain, state, tokens, or panes."
+else
+  log "=== Now using: $NEXT_EMAIL ==="
+  notify "Now using $NEXT_EMAIL"
+  echo ""
+  echo "Switched to: $NEXT_EMAIL"
+  echo "Restarted $PANE_COUNT agents with exact session IDs."
+fi

@@ -15,7 +15,9 @@ const path = require("path");
 
 const DATA_DIR = path.join(__dirname, "..", "data");
 const TOKENS_FILE = path.join(DATA_DIR, "tokens.json");
-const KEYCHAIN_SERVICE = "Claude Code-credentials";
+// Can be overridden via SUPERPOWERD_KEYCHAIN_SERVICE for test runs against a
+// throwaway keychain entry — production always uses "Claude Code-credentials".
+const KEYCHAIN_SERVICE = process.env.SUPERPOWERD_KEYCHAIN_SERVICE || "Claude Code-credentials";
 
 function log(message) {
   console.log("[" + new Date().toISOString() + "] " + message);

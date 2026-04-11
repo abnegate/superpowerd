@@ -8,6 +8,7 @@
     "tokens:capture": "node rotation/tokens.js capture-all",
     "rotate": "./rotation/rotate",
     "rotate:status": "./rotation/rotate --status",
+    "rotate:dry": "./rotation/rotate --dry-run",
     "monitor": "./rotation/monitor",
     "monitor:start": "./rotation/monitor --daemon",
     "monitor:stop": "./rotation/monitor --stop",
